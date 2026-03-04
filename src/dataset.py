@@ -42,7 +42,7 @@ class Dataset:
     RAW_DIR       = Path("data/raw")
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str):
+    def __init__(self, name: str, cfg: str="config/datasets.yaml") -> None:
         """
         Args:
             name: Dataset name — used to find config entry and resolve file paths
