@@ -42,7 +42,7 @@ class Dataset:
     RAW_DIR       = Path("data/raw")
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str="config/datasets.yaml") -> None:
+    def __init__(self, name: str, cfg: str):
         """
         Args:
             name: Dataset name — used to find config entry and resolve file paths
@@ -85,9 +85,12 @@ class Dataset:
         return df
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply numeric and categorical preprocessing steps from config."""
+        """Apply preprocessing steps from config."""
         df   = df.copy()
         prep = self.cfg.get("preprocessing", {})
+
+        # --- Binarize target ---
+        df = self._binarize_target(df, prep.get("binarize_target", {}))
 
         # --- Numeric ---
         num_cfg  = prep.get("numeric", {})
@@ -126,6 +129,22 @@ class Dataset:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _binarize_target(self, df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
+        """Binarize target column: 0 if value < threshold, 1 if value >= threshold."""
+        if not cfg.get("enabled"):
+            return df
+        if not self.target or self.target not in df.columns:
+            logger.warning(f"[{self.name}] Binarize target enabled but '{self.target}' not found")
+            return df
+
+        threshold = cfg.get("threshold")
+        if threshold is None:
+            raise ValueError(f"[{self.name}] binarize_target is enabled but threshold is not set")
+
+        df[self.target] = (df[self.target] >= threshold).astype(int)
+        logger.info(f"[{self.name}] Binarized '{self.target}' with threshold={threshold}")
+        return df
 
     def _onehot(self, df: pd.DataFrame, cols: list) -> pd.DataFrame:
         enc     = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
