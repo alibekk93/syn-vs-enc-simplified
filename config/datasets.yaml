@@ -1,3 +1,41 @@
+# =============================================================================
+# datasets.yaml — Dataset Configuration
+# =============================================================================
+#
+# Each top-level key is a dataset name, which maps directly to:
+#   - input:  data/raw/{name}.csv
+#   - output: data/processed/{name}.csv
+#
+# FIELDS:
+#   features      List of input column names (in the same order as the CSV)
+#   target        Target column name
+#
+# PREPROCESSING:
+#   binarize_target:
+#     enabled     Set to true to binarize the target column
+#     threshold   Values >= threshold → 1, values < threshold → 0
+#
+#   numeric / categorical:
+#     columns     Columns to apply the steps to
+#     steps       Ordered list of preprocessing steps to apply
+#
+#   Available numeric steps:
+#     - impute_median     Fill missing values with column median
+#     - impute_mean       Fill missing values with column mean
+#     - standard_scale    Standardize to zero mean and unit variance
+#     - minmax_scale      Scale to [0, 1] range
+#
+#   Available categorical steps:
+#     - impute_mode       Fill missing values with most frequent value
+#     - onehot_encode     One-hot encode the column
+#
+# ADDING A NEW DATASET:
+#   1. Place the raw CSV in data/raw/{name}.csv
+#   2. Add a new entry below following the same structure
+#   3. Run Dataset("{name}", cfg="config/datasets.yaml").run()
+#
+# =============================================================================
+
 heart_disease:
   features: [age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal]
   target: num
