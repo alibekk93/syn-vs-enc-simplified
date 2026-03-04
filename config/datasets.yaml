@@ -2,21 +2,25 @@ heart_disease:
   features: [age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal, num]
   target: num
   preprocessing:
+    binarize_target:
+      enabled: true
+      threshold: 1
     numeric:
-      columns: [age, trestbps, chol, thalach, oldpeak]
+      columns: [age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal, num]
       steps:
         - impute_median
         - standard_scale
     categorical:
-      columns: [sex, cp, fbs, restecg, exang, slope, ca, thal]
-      steps:
-        - impute_mode
-        - onehot_encode
+      columns: []
+      steps: []
 
 diabetes:
   features: [Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction, Age]
   target: Outcome
   preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
     numeric:
       columns: [Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction, Age]
       steps:
@@ -24,14 +28,15 @@ diabetes:
         - standard_scale
     categorical:
       columns: []
-      steps:
-        - impute_mode
-        - onehot_encode
-  
+      steps: []
+
 breast_cancer:
   features: [mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness, mean_compactness, mean_concavity, mean_concave_points, mean_symmetry, mean_fractal_dimension]
   target: diagnosis
   preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
     numeric:
       columns: [mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness, mean_compactness, mean_concavity, mean_concave_points, mean_symmetry, mean_fractal_dimension]
       steps:
@@ -39,6 +44,4 @@ breast_cancer:
         - standard_scale
     categorical:
       columns: []
-      steps:
-        - impute_mode
-        - onehot_encode
+      steps: []
