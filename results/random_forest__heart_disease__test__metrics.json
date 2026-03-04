@@ -1,0 +1,12 @@
+{
+  "model": "random_forest",
+  "dataset": "heart_disease",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.9016,
+    "precision": 0.8438,
+    "recall": 0.9643,
+    "f1": 0.9,
+    "roc_auc": 0.9491
+  }
+}

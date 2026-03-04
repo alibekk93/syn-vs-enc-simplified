@@ -1,0 +1,12 @@
+{
+  "model": "xgboost",
+  "dataset": "diabetes",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.7532,
+    "precision": 0.6538,
+    "recall": 0.6296,
+    "f1": 0.6415,
+    "roc_auc": 0.8163
+  }
+}

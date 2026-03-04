@@ -5,9 +5,7 @@
 # GLOBAL SETTINGS:
 #   random_seed   Seed for reproducibility across all models
 #   test_size     Fraction of data held out for testing (e.g. 0.2 = 20%)
-#   val_size      Fraction of training data used for validation.
-#                 Used for early stopping in XGBoost and MLP — set to 0 to disable.
-#   stratify      Whether to stratify splits by the target column
+#   stratify      Whether to stratify the train/test split by the target column
 #
 # MODELS:
 #   Each entry under `models` defines one model to train.
@@ -26,13 +24,13 @@
 #   Supported: accuracy, precision, recall, f1, roc_auc
 #
 # OUTPUT:
-#   results_dir   Where to save per-model result JSONs
+#   results_dir   Where to save per-model metric JSONs
+#   models_dir    Where to save serialized model files (.joblib)
 #
 # =============================================================================
 
 random_seed: 42
 test_size: 0.2
-val_size: 0.1       # used for early stopping in xgboost and mlp only
 stratify: true
 
 models:
@@ -55,21 +53,18 @@ models:
       max_depth: 5
       random_state: 42
       eval_metric: logloss
-      early_stopping_rounds: 20
 
   - name: svm
     hyperparameters:
       kernel: rbf
       C: 1.0
-      probability: true
+      probability: true          # required for roc_auc
 
   - name: mlp
     hyperparameters:
       hidden_layer_sizes: [128, 64]
       activation: relu
       max_iter: 200
-      early_stopping: true
-      validation_fraction: 0.1
       random_state: 42
 
 metrics:
@@ -81,3 +76,4 @@ metrics:
 
 output:
   results_dir: results
+  models_dir: models

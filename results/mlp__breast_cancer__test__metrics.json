@@ -1,0 +1,12 @@
+{
+  "model": "mlp",
+  "dataset": "breast_cancer",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.9561,
+    "precision": 0.9855,
+    "recall": 0.9444,
+    "f1": 0.9645,
+    "roc_auc": 0.9937
+  }
+}

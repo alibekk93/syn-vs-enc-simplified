@@ -1,0 +1,12 @@
+{
+  "model": "xgboost",
+  "dataset": "breast_cancer",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.9474,
+    "precision": 0.9459,
+    "recall": 0.9722,
+    "f1": 0.9589,
+    "roc_auc": 0.9934
+  }
+}

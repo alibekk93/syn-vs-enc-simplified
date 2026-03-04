@@ -1,0 +1,12 @@
+{
+  "model": "random_forest",
+  "dataset": "diabetes",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.7468,
+    "precision": 0.6471,
+    "recall": 0.6111,
+    "f1": 0.6286,
+    "roc_auc": 0.8185
+  }
+}

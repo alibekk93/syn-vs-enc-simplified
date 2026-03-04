@@ -1,0 +1,12 @@
+{
+  "model": "logistic_regression",
+  "dataset": "diabetes",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.7143,
+    "precision": 0.6087,
+    "recall": 0.5185,
+    "f1": 0.56,
+    "roc_auc": 0.823
+  }
+}

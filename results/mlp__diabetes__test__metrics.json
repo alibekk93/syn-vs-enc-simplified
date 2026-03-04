@@ -1,0 +1,12 @@
+{
+  "model": "mlp",
+  "dataset": "diabetes",
+  "split": "test",
+  "metrics": {
+    "accuracy": 0.7208,
+    "precision": 0.5902,
+    "recall": 0.6667,
+    "f1": 0.6261,
+    "roc_auc": 0.807
+  }
+}
