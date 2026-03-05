@@ -112,6 +112,15 @@ class Model:
     # Public API
     # ------------------------------------------------------------------
 
+    @classmethod
+    def load(cls, path: str) -> "Model":
+        """Load a saved Model instance from a .joblib file."""
+        model = joblib.load(path)
+        if not isinstance(model, cls):
+            raise TypeError(f"Expected a Model instance, got {type(model)}")
+        logger.info(f"[{model.name}] Loaded from {path}")
+        return model
+
     def run(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> dict:
         """Full pipeline: load → split → train → evaluate."""
         self.load_data(dataset_name, dataset_cfg)
@@ -215,7 +224,7 @@ class Model:
     def _save_model(self) -> None:
         self.models_dir.mkdir(parents=True, exist_ok=True)
         path = self.models_dir / f"{self.name}__{self.dataset_name}.joblib"
-        joblib.dump(self.model, path)
+        joblib.dump(self, path)
         logger.info(f"[{self.name}] Model saved → {path}")
 
     def _save_results(self, results: dict, split: str) -> None:
