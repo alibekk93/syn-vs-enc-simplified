@@ -3,3 +3,4 @@ numpy>=2.4.2
 scikit-learn>=1.8.0
 PyYAML>=6.0.3
 xgboost>=2.0.0
+sdv>=1.0.0

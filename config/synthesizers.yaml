@@ -1,0 +1,40 @@
+# =============================================================================
+# synthesizers.yaml — Synthesizer Configuration
+# =============================================================================
+#
+# Each top-level key is a synthesizer name.
+#
+# FIELDS:
+#   method          Synthesizer method — must match a key in SUPPORTED_SYNTHESIZERS
+#   num_rows        Number of synthetic rows to generate.
+#                   Use "same" to match the size of the original dataset (default).
+#   parameters      Passed directly to the SDV synthesizer constructor
+#
+#   Supported methods:
+#     - gaussian_copula
+#
+#   Supported distributions (for gaussian_copula numerical_distributions):
+#     norm, beta, truncnorm, uniform, gamma, gaussian_kde
+#
+# OUTPUT:
+#   synthetic_dir     Where to save generated synthetic datasets
+#   synthesizers_dir  Where to save fitted synthesizer objects
+#
+# ADDING A NEW METHOD:
+#   1. Add a new entry below following the same structure
+#   2. Register it in SUPPORTED_SYNTHESIZERS in synthesizers.py
+#
+# =============================================================================
+
+output:
+  synthetic_dir: data/synthetic
+  synthesizers_dir: synthesizers
+
+gaussian_copula:
+  method: gaussian_copula
+  num_rows: same             # "same" matches original dataset size, or set an integer
+  parameters:
+    enforce_min_max_values: true
+    enforce_rounding: true
+    default_distribution: norm
+    numerical_distributions: {}
