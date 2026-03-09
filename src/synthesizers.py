@@ -134,6 +134,7 @@ class Synthesizer:
 
         self.synthesizers_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthesizers_dir / f"{self.name}__{self.dataset_name}.pkl"
+        self.synthesizer._n_rows_original = self.n_rows_original
         self.synthesizer.save(str(path))
         logger.info(f"[{self.name}] Synthesizer saved → {path}")
 
@@ -152,8 +153,8 @@ class Synthesizer:
         instance.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         instance.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
         instance.dataset_name     = stem[1] if len(stem) > 1 else None
-        instance.n_rows_original  = None  # not stored in .pkl — pass num_rows to sample() explicitly if needed
-        instance.synthesizer      = SUPPORTED_SYNTHESIZERS[instance.method].load(str(path))
+        instance.synthesizer     = SUPPORTED_SYNTHESIZERS[instance.method].load(str(path))
+        instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
 
         logger.info(f"[{name}] Loaded from {path}")
         return instance
