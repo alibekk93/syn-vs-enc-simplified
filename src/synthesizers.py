@@ -1,3 +1,4 @@
+# src/synthesizers.py
 """Synthesizer class for fitting and sampling synthetic tabular data."""
 
 import logging

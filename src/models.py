@@ -1,3 +1,4 @@
+# src/models.py
 """Model class for initializing, training, evaluating and predicting."""
 
 import logging
