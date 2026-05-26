@@ -1,0 +1,19 @@
+# =============================================================================
+# quick.yaml — Quick Run Configuration
+# =============================================================================
+#
+# Minimal subset for fast testing — one dataset, one model, one synthesizer,
+# FHE in simulate mode.
+#
+# =============================================================================
+
+datasets:     [heart_disease]
+models:       [logistic_regression]
+synthesizers: [gaussian_copula]
+fhe_mode:     simulate
+
+pipelines:
+  preprocessing: true
+  raw:           true
+  synthetic:     true
+  fhe:           true
