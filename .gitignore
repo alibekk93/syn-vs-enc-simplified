@@ -23,6 +23,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.python-version
 
 # PyInstaller
 *.manifest
@@ -188,12 +189,12 @@ marimo/_static/
 marimo/_lsp/
 
 # Data directories
-# data/raw/*
-# data/processed/*
-# data/synthetic/*
-# !data/raw/README.md
-# !data/processed/.gitkeep
-# !data/synthetic/.gitkeep
+data/raw/*
+data/processed/*
+data/synthetic/*
+!data/raw/README.md
+!data/processed/.gitkeep
+!data/synthetic/.gitkeep
 
 # Results directories
 results/experiments/*
