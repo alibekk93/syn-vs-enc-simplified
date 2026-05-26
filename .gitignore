@@ -188,17 +188,7 @@ __marimo__/
 marimo/_static/
 marimo/_lsp/
 
-# Data directories
-data/raw/*
-data/processed/*
-data/synthetic/*
-!data/raw/README.md
-!data/processed/.gitkeep
-!data/synthetic/.gitkeep
-
-# Results directories
-results/experiments/*
-results/summary/*
-!results/README.md
-!results/experiments/.gitkeep
-!results/summary/.gitkeep
+# Data, results, models directories
+data/
+models/
+results/
