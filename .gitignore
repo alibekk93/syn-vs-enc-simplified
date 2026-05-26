@@ -15,7 +15,7 @@ ENV/
 .ipynb_checkpoints/
 *.ipynb
 
-# --- Data / Results / Models ---
+# --- Data / Results / Models / Synthesizers ---
 data/
 results/
 models/
