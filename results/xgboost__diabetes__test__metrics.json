@@ -3,10 +3,10 @@
   "dataset": "diabetes",
   "split": "test",
   "metrics": {
-    "accuracy": 0.7532,
-    "precision": 0.6538,
+    "accuracy": 0.7403,
+    "precision": 0.6296,
     "recall": 0.6296,
-    "f1": 0.6415,
+    "f1": 0.6296,
     "roc_auc": 0.8163
   }
 }
