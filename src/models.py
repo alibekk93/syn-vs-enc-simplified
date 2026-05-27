@@ -130,16 +130,29 @@ class Model:
         return self.evaluate()
 
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
-        """Load processed dataset and resolve target column from datasets.yaml."""
+        """Load processed dataset and resolve target column from datasets.yaml.
+        For synthetic datasets (named '<synth>__<original>'), uses the original dataset's config.
+        """
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
         logger.info(f"[{self.name}] Loading data from {path}")
         self.df = pd.read_csv(path)
 
         ds_cfg = load_config(dataset_cfg)
-        if dataset_name not in ds_cfg:
-            raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
-        self.target       = ds_cfg[dataset_name]["target"]
-        self.dataset_name = dataset_name
+        if dataset_name in ds_cfg:
+            self.target       = ds_cfg[dataset_name]["target"]
+            self.dataset_name = dataset_name
+        else:
+            # Try to interpret as a synthetic dataset: <synthesizer>__<original_dataset>
+            parts = dataset_name.split('__')
+            if len(parts) == 2:
+                base_dataset_name = parts[1]
+                if base_dataset_name in ds_cfg:
+                    self.target       = ds_cfg[base_dataset_name]["target"]
+                    self.dataset_name = dataset_name
+                else:
+                    raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg} and base dataset '{base_dataset_name}' not found either.")
+            else:
+                raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
 
         logger.info(f"[{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 

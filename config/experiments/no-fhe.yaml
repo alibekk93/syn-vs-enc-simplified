@@ -1,0 +1,19 @@
+# =============================================================================
+# no-fhe.yaml — FHE-less Run Configuration
+# =============================================================================
+#
+# Subset for testing all datasets, models and synthesizers,
+# FHE in simulate mode.
+#
+# =============================================================================
+
+datasets:     null
+models:       null
+synthesizers: null
+fhe_mode:     simulate
+
+pipelines:
+  preprocessing: true
+  raw:           true
+  synthetic:     true
+  fhe:           true

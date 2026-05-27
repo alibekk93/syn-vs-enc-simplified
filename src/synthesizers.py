@@ -25,7 +25,8 @@ class Synthesizer:
 
     Usage:
         synth = Synthesizer("gaussian_copula", cfg="config/synthesizers.yaml")
-        synth.fit("heart_disease")
+        synth.load_data("heart_disease")
+        synth.fit()
         synthetic_df = synth.sample()
         synth.save()
 
@@ -63,10 +64,11 @@ class Synthesizer:
         self.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         self.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
 
-        # Placeholders — populated in fit()
+        # Placeholders — populated in load_data() and fit()
         self.dataset_name: Optional[str]    = None
         self.n_rows_original: Optional[int] = None
         self.synthesizer: Optional[object]  = None
+        self.df: Optional[pd.DataFrame]     = None
 
         logger.info(f"[{self.name}] Initialized with method='{self.method}'")
 
@@ -74,24 +76,40 @@ class Synthesizer:
     # Public API
     # ------------------------------------------------------------------
 
+    def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
+        """Load processed dataset and store it for fitting.
+
+        Similar to Model.load_data but does not extract a target column.
+        """
+        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
+        logger.info(f"[{self.name}] Loading data from {path}")
+        self.df = pd.read_csv(path)
+
+        # Store dataset name for artifacts; no target needed for synthesis
+        self.dataset_name = dataset_name
+        self.n_rows_original = len(self.df)
+
+        logger.info(f"[{self.name}] Loaded {len(self.df)} rows")
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def run(self, dataset_name: str) -> pd.DataFrame:
-        """Full pipeline: fit → sample → save."""
-        self.fit(dataset_name)
+        """Full pipeline: load_data → fit → sample → save."""
+        self.load_data(dataset_name)
+        self.fit()
         synthetic_df = self.sample()
         self.save()
         return synthetic_df
 
-    def fit(self, dataset_name: str) -> None:
-        """Fit the synthesizer on a processed dataset."""
-        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.info(f"[{self.name}] Loading data from {path}")
-        df = pd.read_csv(path)
+    def fit(self) -> None:
+        """Fit the synthesizer on the loaded data."""
+        if self.df is None:
+            raise RuntimeError("Call load_data() before fit()")
 
-        self.dataset_name    = dataset_name
-        self.n_rows_original = len(df)
-
-        metadata = Metadata.detect_from_dataframe(df)
-        logger.info(f"[{self.name}] Metadata detected for {len(df.columns)} columns")
+        metadata = Metadata.detect_from_dataframe(self.df)
+        logger.info(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
 
         params = self.synth_cfg.get("parameters") or {}
         if not params.get("numerical_distributions"):
@@ -100,7 +118,7 @@ class Synthesizer:
         self.synthesizer = SUPPORTED_SYNTHESIZERS[self.method](metadata, **params)
 
         logger.info(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
-        self.synthesizer.fit(df)
+        self.synthesizer.fit(self.df)
         logger.info(f"[{self.name}] Fitting complete")
 
     def sample(self, num_rows: Optional[Union[int, str]] = None) -> pd.DataFrame:

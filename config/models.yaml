@@ -16,7 +16,6 @@
 #     - logistic_regression
 #     - random_forest
 #     - xgboost
-#     - svm
 #     - mlp
 #
 # METRICS:
@@ -53,12 +52,6 @@ models:
       max_depth: 5
       random_state: 42
       eval_metric: logloss
-
-  - name: svm
-    hyperparameters:
-      kernel: rbf
-      C: 1.0
-      probability: true          # required for roc_auc
 
   - name: mlp
     hyperparameters:

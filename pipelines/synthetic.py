@@ -43,7 +43,8 @@ def run(
             logger.info(f"--- Synthesizing: {synth_name} on {dataset_name} ---")
             try:
                 synth = Synthesizer(synth_name, cfg=SYNTHESIZERS_CFG)
-                synth.fit(dataset_name)
+                synth.load_data(dataset_name, dataset_cfg=DATASETS_CFG)
+                synth.fit()
                 synth.sample()
                 synth.save()
             except Exception as e:
