@@ -83,3 +83,51 @@ breast_cancer:
     categorical:
       columns: []
       steps: []
+
+maternal_health_risk:
+  features: [Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate]
+  target: RiskLevel
+  preprocessing:
+    binarize_target:
+      enabled: true
+      threshold: 1
+    numeric:
+      columns: [Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: []
+      steps: []
+
+pregnancy_outcome:
+  features: [Age, Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction]
+  target: Outcome
+  preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
+    numeric:
+      columns: [Age, Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: []
+      steps: []
+
+gestational_diabetes:
+  features: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sys BP, Dia BP, OGTT, Hemoglobin, Sedentary Lifestyle, Prediabetes]
+  target: Class Label(GDM /Non GDM)
+  preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
+    numeric:
+      columns: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Sys BP, Dia BP, OGTT, Hemoglobin]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: [Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sedentary Lifestyle, Prediabetes]
+      steps: [impute_mode]
