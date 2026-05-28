@@ -248,7 +248,8 @@ class Model:
 
     def _save_results(self, results: dict, split: str) -> None:
         self.results_dir.mkdir(parents=True, exist_ok=True)
-        path = self.results_dir / f"{self.name}__{self.dataset_name}__{split}__metrics.json"
+        dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
+        path = self.results_dir / f"{self.mode}__{self.name}__{dataset_to_use}__{split}__metrics.json"
         with open(path, "w") as f:
-            json.dump({"model": self.name, "dataset": self.dataset_name, "split": split, "metrics": results}, f, indent=2)
+            json.dump({"mode": self.mode, "model": self.name, "dataset": dataset_to_use, "split": split, "metrics": results}, f, indent=2)
         logger.info(f"[{self.name}] Results saved → {path}")

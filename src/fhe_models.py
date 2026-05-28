@@ -240,8 +240,13 @@ class FHEModel:
         """
         params = hyperparams.copy()
 
-        # All Concrete ML models accept n_bits for quantization precision
-        params.setdefault("n_bits", 8)
+        # Concrete ML models other than MLP accept n_bits for quantization precision
+        try:
+            params.setdefault("n_bits", 8)
+        except:
+            params.setdefault("module__n_w_bits", 8)
+            params.setdefault("module__n_a_bits", 8)
+            params.setdefault("module__n_accum_bits", 8)
 
         if name == "mlp":
             # Strip sklearn-only params — Concrete ML uses module__* equivalents
@@ -266,6 +271,7 @@ class FHEModel:
         path = results_dir / f"fhe__{self.name}__{self.dataset_name}__{split}__metrics.json"
         with open(path, "w") as f:
             json.dump({
+                "mode":    self.mode,
                 "model":   self.name,
                 "dataset": self.dataset_name,
                 "split":   split,
