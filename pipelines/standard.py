@@ -1,4 +1,4 @@
-"""Raw training pipeline — trains and evaluates models on processed data."""
+"""Standard training pipeline — trains and evaluates models on processed data."""
 
 import logging
 from src.utils import load_config
@@ -22,7 +22,7 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
     targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
 
-    logger.info(f"Raw pipeline started — datasets: {targets_datasets}, models: {targets_models}")
+    logger.info(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
 
     results = {}
     for dataset_name in targets_datasets:
@@ -36,5 +36,5 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
                 logger.error(f"Failed: {model_name} on {dataset_name}: {e}")
                 results[dataset_name][model_name] = {"error": str(e)}
 
-    logger.info("Raw pipeline complete.")
+    logger.info("Standard pipeline complete.")
     return results

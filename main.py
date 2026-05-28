@@ -10,7 +10,7 @@ import argparse
 import logging
 
 from src.utils import load_config
-from pipelines import preprocessing, raw, synthetic, fhe
+from pipelines import preprocessing, standard, synthetic, fhe
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,7 +39,7 @@ if __name__ == "__main__":
 
     if pipelines.get("raw"):
         logger.info("=== Raw ===")
-        raw.run(datasets=datasets, models=models)
+        standard.run(datasets=datasets, models=models)
 
     if pipelines.get("synthetic"):
         logger.info("=== Synthetic ===")
