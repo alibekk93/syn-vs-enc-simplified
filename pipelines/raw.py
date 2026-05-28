@@ -30,7 +30,7 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
         for model_name in targets_models:
             logger.info(f"--- {model_name} on {dataset_name} ---")
             try:
-                metrics = Model(model_name, cfg=MODELS_CFG).run(dataset_name)
+                metrics = Model(model_name, cfg=MODELS_CFG, mode="standard").run(dataset_name)
                 results[dataset_name][model_name] = metrics
             except Exception as e:
                 logger.error(f"Failed: {model_name} on {dataset_name}: {e}")

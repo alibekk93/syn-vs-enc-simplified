@@ -65,13 +65,13 @@ class FHEModel:
     """
 
     PROCESSED_DIR = Path("data/processed")
-    FHE_MODELS_DIR = Path("models/fhe")
 
-    def __init__(self, name: str, cfg: str = "config/models.yaml"):
+    def __init__(self, name: str, cfg: str = "config/models.yaml", mode: str = "fhe"):
         """
         Args:
             name: Model name — must be a key in SUPPORTED_MODELS and models.yaml
             cfg:  Path to models.yaml (shared with standard Model class)
+            mode: Mode of operation — 'fhe' etc. Used for saving.
         """
         all_cfg    = load_config(cfg)
         model_cfgs = {m["name"]: m for m in all_cfg.get("models", [])}
@@ -84,6 +84,11 @@ class FHEModel:
         self.name      = name
         self.cfg       = all_cfg
         self.model_cfg = model_cfgs[name]
+        self.mode      = mode
+
+        output_cfg       = all_cfg.get("output", {})
+        self.results_dir = Path(output_cfg.get("results_dir", "results"))
+        self.models_dir  = Path(output_cfg.get("models_dir", "models"))
 
         hyperparams = self._prepare_hyperparams(name, self.model_cfg.get("hyperparameters") or {})
         self.model  = SUPPORTED_MODELS[name](**hyperparams)
@@ -96,8 +101,10 @@ class FHEModel:
         self.X_test:       Optional[np.ndarray]   = None
         self.y_train:      Optional[np.ndarray]   = None
         self.y_test:       Optional[np.ndarray]   = None
+        # For saving: if set, overrides self.dataset_name in the saved directory name
+        self.save_dataset_name: Optional[str]     = None
 
-        logger.info(f"[FHE:{self.name}] Initialized with hyperparameters: {hyperparams}")
+        logger.info(f"[FHE:{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
 
     # ------------------------------------------------------------------
     # Public API
@@ -117,10 +124,21 @@ class FHEModel:
         self.df = pd.read_csv(path)
 
         ds_cfg = load_config(dataset_cfg)
-        if dataset_name not in ds_cfg:
-            raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
-        self.target       = ds_cfg[dataset_name]["target"]
-        self.dataset_name = dataset_name
+        if dataset_name in ds_cfg:
+            self.target       = ds_cfg[dataset_name]["target"]
+            self.dataset_name = dataset_name
+        else:
+            # Try to interpret as a synthetic dataset: <synthesizer>/<fhe>__<original_dataset>
+            parts = dataset_name.split('__')
+            if len(parts) == 2:
+                base_dataset_name = parts[1]
+                if base_dataset_name in ds_cfg:
+                    self.target       = ds_cfg[base_dataset_name]["target"]
+                    self.dataset_name = dataset_name
+                else:
+                    raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg} and base dataset '{base_dataset_name}' not found either.")
+            else:
+                raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
 
         logger.info(f"[FHE:{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
@@ -234,7 +252,9 @@ class FHEModel:
 
     def _save_model(self) -> None:
         """Save compiled FHE model using FHEModelDev (produces client/server files)."""
-        out_dir = self.FHE_MODELS_DIR / f"{self.name}__{self.dataset_name}"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
+        out_dir = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}"
         out_dir.mkdir(parents=True, exist_ok=True)
         dev = FHEModelDev(path_dir=str(out_dir), model=self.model)
         dev.save()

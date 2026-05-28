@@ -59,8 +59,10 @@ def run(
             for model_name in targets_models:
                 logger.info(f"--- {model_name} on synthetic {synthetic_dataset} ---")
                 try:
-                    model = Model(model_name, cfg=MODELS_CFG)
+                    model = Model(model_name, cfg=MODELS_CFG, mode=synth_name)
                     model.load_data(synthetic_dataset, dataset_cfg=DATASETS_CFG)
+                    # Save using the original dataset name, not the synthetic dataset name
+                    model.save_dataset_name = dataset_name
                     model.split()
                     model.train()
                     metrics = model.evaluate()

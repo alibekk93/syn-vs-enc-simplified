@@ -35,7 +35,7 @@ def run(
         for model_name in targets_models:
             logger.info(f"--- FHE {model_name} on {dataset_name} ---")
             try:
-                model = FHEModel(model_name, cfg=MODELS_CFG)
+                model = FHEModel(model_name, cfg=MODELS_CFG, mode="fhe")
                 model.load_data(dataset_name)
                 model.split()
                 model.train()

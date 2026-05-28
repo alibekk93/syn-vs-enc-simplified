@@ -73,11 +73,12 @@ class Model:
 
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str = "config/models.yaml"):
+    def __init__(self, name: str, cfg: str = "config/models.yaml", mode: str = "standard"):
         """
         Args:
             name: Model name — must be a key in SUPPORTED_MODELS
             cfg:  Path to models.yaml
+            mode: Mode of operation — 'standard', 'synthesized', etc. Used for saving.
         """
         all_cfg    = load_config(cfg)
         model_cfgs = {m["name"]: m for m in all_cfg.get("models", [])}
@@ -90,6 +91,7 @@ class Model:
         self.name      = name
         self.cfg       = all_cfg
         self.model_cfg = model_cfgs[name]
+        self.mode      = mode
 
         output_cfg       = all_cfg.get("output", {})
         self.results_dir = Path(output_cfg.get("results_dir", "results"))
@@ -106,8 +108,10 @@ class Model:
         self.X_test:       Optional[pd.DataFrame] = None
         self.y_train:      Optional[pd.Series]    = None
         self.y_test:       Optional[pd.Series]    = None
+        # For saving: if set, overrides self.dataset_name in the saved filename/path
+        self.save_dataset_name: Optional[str]     = None
 
-        logger.info(f"[{self.name}] Initialized with hyperparameters: {hyperparams}")
+        logger.info(f"[{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
 
     # ------------------------------------------------------------------
     # Public API
@@ -142,7 +146,7 @@ class Model:
             self.target       = ds_cfg[dataset_name]["target"]
             self.dataset_name = dataset_name
         else:
-            # Try to interpret as a synthetic dataset: <synthesizer>__<original_dataset>
+            # Try to interpret as a synthetic dataset: <synthesizer>/<fhe>__<original_dataset>
             parts = dataset_name.split('__')
             if len(parts) == 2:
                 base_dataset_name = parts[1]
@@ -237,7 +241,8 @@ class Model:
 
     def _save_model(self) -> None:
         self.models_dir.mkdir(parents=True, exist_ok=True)
-        path = self.models_dir / f"{self.name}__{self.dataset_name}.joblib"
+        dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
+        path = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}.joblib"
         joblib.dump(self, path)
         logger.info(f"[{self.name}] Model saved → {path}")
 
