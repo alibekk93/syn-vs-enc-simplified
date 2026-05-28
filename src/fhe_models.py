@@ -1,3 +1,4 @@
+# src/fhe_models.py
 """FHE Model class using Concrete ML for privacy-preserving inference."""
 
 import logging
@@ -7,13 +8,16 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 
+# Concrete ML serialization
+from concrete.ml.common.serialization.dumpers import dump as cml_dump
+from concrete.ml.common.serialization.loaders import load as cml_load
+
 from concrete.ml.sklearn import (
     LogisticRegression,
     RandomForestClassifier,
     XGBClassifier,
     NeuralNetClassifier,
 )
-from concrete.ml.deployment import FHEModelDev
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
@@ -228,6 +232,31 @@ class FHEModel:
         logger.info(f"[FHE:{self.name}] Evaluation ({on}, fhe={fhe}): {results}")
         self._save_results(results, on, fhe)
         return results
+    
+    @classmethod
+    def load(cls, path: str) -> "FHEModel":
+        """Load a Concrete ML model from JSON file."""
+        path = Path(path)
+
+        with open(path, "r") as f:
+            model_obj = cml_load(f)
+
+        # Create wrapper instance
+        instance = cls(name="loaded_fhe_model")  # placeholder name
+        instance.model = model_obj
+
+        logger.info(f"[FHE] Loaded model from {path}")
+
+        return instance
+    
+    def compile(self) -> None:
+        """Recompile loaded model (required for FHE execution/simulation)."""
+        if self.X_train is None:
+            raise RuntimeError("Need training data to compile model")
+
+        logger.info(f"[FHE:{self.name}] Recompiling model...")
+        self.model.compile(self.X_train)
+
 
     # ------------------------------------------------------------------
     # Internal
@@ -256,14 +285,16 @@ class FHEModel:
         return params
 
     def _save_model(self) -> None:
-        """Save compiled FHE model using FHEModelDev (produces client/server files)."""
+        """Save model using Concrete ML JSON serialization."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
+
         dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
-        out_dir = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}"
-        out_dir.mkdir(parents=True, exist_ok=True)
-        dev = FHEModelDev(path_dir=str(out_dir), model=self.model)
-        dev.save()
-        logger.info(f"[FHE:{self.name}] Model saved → {out_dir}")
+        path = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}.json"
+
+        with open(path, "w") as f:
+            cml_dump(self.model, f)
+
+        logger.info(f"[FHE:{self.name}] Model saved (Concrete ML JSON) → {path}")
 
     def _save_results(self, results: dict, split: str, fhe: str) -> None:
         results_dir = Path(self.cfg.get("output", {}).get("results_dir", "results"))
