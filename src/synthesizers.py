@@ -8,6 +8,7 @@ from typing import Optional, Union
 
 from sdv.single_table import GaussianCopulaSynthesizer
 from sdv.metadata import Metadata
+from sklearn.model_selection import train_test_split
 
 from src.utils import load_config
 
@@ -56,6 +57,8 @@ class Synthesizer:
         self.cfg       = all_cfg
         self.synth_cfg = all_cfg[name]
         self.method    = self.synth_cfg["method"]
+        self.test_size     = self.synth_cfg.get("test_size", 0.0)
+        self.random_state  = self.synth_cfg.get("random_state", 42)
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
@@ -80,20 +83,38 @@ class Synthesizer:
         """Load processed dataset and store it for fitting.
 
         Similar to Model.load_data but does not extract a target column.
+        Additionally, splits the dataset into train/test.
         """
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
         logger.info(f"[{self.name}] Loading data from {path}")
-        self.df = pd.read_csv(path)
+        df = pd.read_csv(path)
 
-        # Store dataset name for artifacts; no target needed for synthesis
+        # Store dataset name and original size (BEFORE split)
         self.dataset_name = dataset_name
-        self.n_rows_original = len(self.df)
+        self.n_rows_original = len(df)
 
-        logger.info(f"[{self.name}] Loaded {len(self.df)} rows")
+        # --- Split ---
+        test_size = self.test_size
+        random_state = self.random_state
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        df_train, df_test = train_test_split(
+            df,
+            test_size=test_size,
+            random_state=random_state,
+            shuffle=True
+        )
+
+        # Store splits
+        self.df_train = df_train.reset_index(drop=True)
+        self.df_test  = df_test.reset_index(drop=True)
+
+        # Use TRAIN ONLY for fitting
+        self.df = self.df_train
+
+        logger.info(
+            f"[{self.name}] Loaded {self.n_rows_original} rows "
+            f"(train={len(self.df_train)}, test={len(self.df_test)})"
+        )
 
     def run(self, dataset_name: str) -> pd.DataFrame:
         """Full pipeline: load_data → fit → sample → save."""
