@@ -1,0 +1,18 @@
+enabled: true
+
+time:
+  enabled: true
+
+memory:
+  enabled: true
+
+storage:
+  enabled: true
+
+fhe:
+  enabled: true
+
+logging:
+  save: true
+  output_dir: results/resource_profiles
+  
