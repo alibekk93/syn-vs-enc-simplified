@@ -22,8 +22,6 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
     Returns:
         Nested dict of {dataset: {model: metrics}}
     """
-    profiler = ResourceProfiler(load_config(RESOURCE_CFG))
-
     targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
 
@@ -34,60 +32,54 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
         results[dataset_name] = {}
         for model_name in targets_models:
             logger.info(f"--- {model_name} on {dataset_name} ---")
+
+            profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+
             try:
                 model = Model(model_name, cfg=MODELS_CFG, mode="standard")
 
-                # Start memory sampling for training phase
-                profiler.start_memory_sampling()
+                # Explicit phase labels so training and inference
+                # memory snapshots are stored separately.
+                profiler.start_memory_sampling(phase="training")
 
-                # Time data loading
                 with profiler.time_block("data_loading"):
                     model.load_data(dataset_name)
                     model.split()
 
-                # Time training
                 with profiler.time_block("training"):
                     model.train()
 
-                # Stop memory sampling and get training memory stats
                 profiler.stop_memory_sampling()
 
-                # Start memory sampling for inference
-                profiler.start_memory_sampling()
+                profiler.start_memory_sampling(phase="inference")
 
-                # Time inference
-                start = time.time()
+                start   = time.time()
                 metrics = model.evaluate()
-                end = time.time()
+                end     = time.time()
 
-                # Log inference time
                 profiler.log_inference(end - start, len(model.X_test))
-
-                # Stop memory sampling and get inference memory stats
                 profiler.stop_memory_sampling()
 
-                # Log storage (model and data sizes)
                 model_path = f"models/standard__{model_name}__{dataset_name}.joblib"
-                data_path = f"data/processed/{dataset_name}.csv"
+                data_path  = f"data/processed/{dataset_name}.csv"
                 profiler.log_storage(model_path=model_path, data_path=data_path)
 
-                # Store results with profiling data
                 results[dataset_name][model_name] = {
-                    "metrics": metrics,
-                    "profiling": profiler.export()
+                    "metrics":   metrics,
+                    "profiling": profiler.export(),
                 }
 
-                # Reset profiler for next iteration
+                # Persist profiling results to disk.
+                profiler.save(f"standard__{model_name}__{dataset_name}")
                 profiler.reset()
 
             except Exception as e:
                 logger.error(f"Failed: {model_name} on {dataset_name}: {e}")
                 results[dataset_name][model_name] = {
-                    "error": str(e),
-                    "profiling": profiler.export() if 'profiler' in locals() else {}
+                    "error":     str(e),
+                    "profiling": profiler.export(),
                 }
-                if 'profiler' in locals():
-                    profiler.reset()
+                profiler.reset()
 
     logger.info("Standard pipeline complete.")
     return results
