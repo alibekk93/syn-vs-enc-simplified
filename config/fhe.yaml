@@ -1,0 +1,20 @@
+# =============================================================================
+# fhe.yaml — FHE Quantization Configuration
+# =============================================================================
+
+models:
+
+  logistic_regression:
+    n_bits: 2
+
+  random_forest:
+    n_bits: 2
+
+  xgboost:
+    n_bits: 2
+
+  mlp:
+    n_w_bits: 2
+    n_a_bits: 2
+    n_accum_bits: 2
+    n_layers: 2

@@ -41,7 +41,7 @@ models:
 
   - name: random_forest
     hyperparameters:
-      n_estimators: 50
+      n_estimators: 20
       max_depth: 10
       random_state: 42
 

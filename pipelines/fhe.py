@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 DATASETS_CFG = "config/datasets.yaml"
 MODELS_CFG   = "config/models.yaml"
+FHE_CFG      = "config/fhe.yaml"
 
 
 def run(
@@ -26,6 +27,7 @@ def run(
     """
     targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
+    fhe_config = load_config(FHE_CFG)
 
     logger.info(f"FHE pipeline started — datasets: {targets_datasets}, models: {targets_models}, fhe_mode: {fhe_mode}")
 
@@ -35,7 +37,12 @@ def run(
         for model_name in targets_models:
             logger.info(f"--- FHE {model_name} on {dataset_name} ---")
             try:
-                model = FHEModel(model_name, cfg=MODELS_CFG, mode="fhe")
+                model = FHEModel(
+                model_name,
+                cfg=MODELS_CFG,
+                mode="fhe",
+                fhe_cfg=fhe_config
+            )
                 model.load_data(dataset_name)
                 model.split()
                 model.train()

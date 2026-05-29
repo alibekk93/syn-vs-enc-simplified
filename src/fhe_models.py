@@ -28,8 +28,6 @@ from src.utils import load_config
 
 logger = logging.getLogger(__name__)
 
-# Concrete ML equivalents of the models in models.yaml.
-# Note: mlp uses NeuralNetClassifier (Concrete ML's QAT-based FCNN, not sklearn MLP)
 SUPPORTED_MODELS = {
     "logistic_regression": LogisticRegression,
     "random_forest":       RandomForestClassifier,
@@ -37,7 +35,6 @@ SUPPORTED_MODELS = {
     "mlp":                 NeuralNetClassifier,
 }
 
-# sklearn-only params to strip before passing to Concrete ML constructors
 _SKLEARN_ONLY = {"hidden_layer_sizes", "activation", "max_iter", "random_state"}
 
 SUPPORTED_METRICS = {
@@ -50,33 +47,16 @@ SUPPORTED_METRICS = {
 
 
 class FHEModel:
-    """
-    Wraps a Concrete ML model with train/compile/predict/evaluate functionality,
-    reusing the same config/models.yaml as the standard Model class.
-
-    The pipeline adds a compile() step after fit(), which is required by
-    Concrete ML before FHE inference can be performed.
-
-    Usage:
-        fhe = FHEModel("logistic_regression", cfg="config/models.yaml")
-        fhe.load_data("heart_disease")
-        fhe.split()
-        fhe.train()       # fits and compiles the FHE circuit
-        metrics = fhe.evaluate()
-
-        # or all at once:
-        metrics = fhe.run("heart_disease")
-    """
 
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str = "config/models.yaml", mode: str = "fhe"):
-        """
-        Args:
-            name: Model name — must be a key in SUPPORTED_MODELS and models.yaml
-            cfg:  Path to models.yaml (shared with standard Model class)
-            mode: Mode of operation — 'fhe' etc. Used for saving.
-        """
+    def __init__(
+        self,
+        name: str,
+        cfg: str = "config/models.yaml",
+        mode: str = "fhe",
+        fhe_cfg: Optional[dict] = None,
+    ):
         all_cfg    = load_config(cfg)
         model_cfgs = {m["name"]: m for m in all_cfg.get("models", [])}
 
@@ -89,6 +69,7 @@ class FHEModel:
         self.cfg       = all_cfg
         self.model_cfg = model_cfgs[name]
         self.mode      = mode
+        self.fhe_cfg   = fhe_cfg or {}
 
         output_cfg       = all_cfg.get("output", {})
         self.results_dir = Path(output_cfg.get("results_dir", "results"))
@@ -98,15 +79,14 @@ class FHEModel:
         self.model  = SUPPORTED_MODELS[name](**hyperparams)
 
         # Data placeholders
-        self.df:           Optional[pd.DataFrame] = None
-        self.target:       Optional[str]          = None
-        self.dataset_name: Optional[str]          = None
-        self.X_train:      Optional[np.ndarray]   = None
-        self.X_test:       Optional[np.ndarray]   = None
-        self.y_train:      Optional[np.ndarray]   = None
-        self.y_test:       Optional[np.ndarray]   = None
-        # For saving: if set, overrides self.dataset_name in the saved directory name
-        self.save_dataset_name: Optional[str]     = None
+        self.df: Optional[pd.DataFrame] = None
+        self.target: Optional[str] = None
+        self.dataset_name: Optional[str] = None
+        self.X_train: Optional[np.ndarray] = None
+        self.X_test: Optional[np.ndarray] = None
+        self.y_train: Optional[np.ndarray] = None
+        self.y_test: Optional[np.ndarray] = None
+        self.save_dataset_name: Optional[str] = None
 
         logger.info(f"[FHE:{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
 
@@ -115,39 +95,35 @@ class FHEModel:
     # ------------------------------------------------------------------
 
     def run(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> dict:
-        """Full pipeline: load → split → train (fit + compile) → evaluate."""
         self.load_data(dataset_name, dataset_cfg)
         self.split()
         self.train()
         return self.evaluate()
 
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
-        """Load processed dataset and resolve target column from datasets.yaml."""
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
         logger.info(f"[FHE:{self.name}] Loading data from {path}")
         self.df = pd.read_csv(path)
 
         ds_cfg = load_config(dataset_cfg)
         if dataset_name in ds_cfg:
-            self.target       = ds_cfg[dataset_name]["target"]
+            self.target = ds_cfg[dataset_name]["target"]
             self.dataset_name = dataset_name
         else:
-            # Try to interpret as a synthetic dataset: <synthesizer>/<fhe>__<original_dataset>
             parts = dataset_name.split('__')
             if len(parts) == 2:
                 base_dataset_name = parts[1]
                 if base_dataset_name in ds_cfg:
-                    self.target       = ds_cfg[base_dataset_name]["target"]
+                    self.target = ds_cfg[base_dataset_name]["target"]
                     self.dataset_name = dataset_name
                 else:
-                    raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg} and base dataset '{base_dataset_name}' not found either.")
+                    raise KeyError(f"Dataset '{dataset_name}' not found.")
             else:
-                raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
+                raise KeyError(f"Dataset '{dataset_name}' not found.")
 
         logger.info(f"[FHE:{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
     def split(self) -> None:
-        """Split loaded data into train and test sets, returned as numpy arrays."""
         if self.df is None or self.target is None:
             raise RuntimeError("Call load_data() before split()")
 
@@ -163,150 +139,105 @@ class FHEModel:
             stratify=y if stratify else None
         )
 
-        logger.info(f"[FHE:{self.name}] Split → train={len(self.X_train)}, test={len(self.X_test)}")
-
     def train(self) -> None:
-        """Fit and compile the FHE model, then save it."""
         if self.X_train is None:
             raise RuntimeError("Call split() before train()")
 
-        logger.info(f"[FHE:{self.name}] Fitting...")
         self.model.fit(self.X_train, self.y_train)
-
-        logger.info(f"[FHE:{self.name}] Compiling FHE circuit...")
         self.model.compile(self.X_train)
-        logger.info(f"[FHE:{self.name}] Compilation complete")
-
         self._save_model()
 
     def predict(self, X: np.ndarray, fhe: str = "simulate") -> np.ndarray:
-        """
-        Return class predictions.
-
-        Args:
-            X:   Input array
-            fhe: One of 'disable' (quantized clear), 'simulate' (FHE simulation),
-                 'execute' (real FHE — slow)
-        """
         return self.model.predict(X, fhe=fhe)
 
     def predict_proba(self, X: np.ndarray, fhe: str = "simulate") -> Optional[np.ndarray]:
-        """Return probability estimates, or None if not supported by this model."""
         if hasattr(self.model, "predict_proba"):
             return self.model.predict_proba(X, fhe=fhe)[:, 1]
         return None
 
     def evaluate(self, on: str = "test", fhe: str = "simulate") -> dict:
-        """
-        Compute metrics on the specified split.
-
-        Args:
-            on:  One of 'train', 'test'
-            fhe: Inference mode — 'disable', 'simulate', or 'execute'
-
-        Returns:
-            Dict of metric name → score
-        """
         splits = {
             "train": (self.X_train, self.y_train),
             "test":  (self.X_test,  self.y_test),
         }
-        if on not in splits:
-            raise ValueError(f"'on' must be one of {list(splits)}")
 
         X, y = splits[on]
-        if X is None or y is None:
-            raise RuntimeError(f"'{on}' split is not available")
-
         y_pred  = self.predict(X, fhe=fhe)
         y_proba = self.predict_proba(X, fhe=fhe)
 
         metric_names = self.cfg.get("metrics") or list(SUPPORTED_METRICS)
         results = {}
         for metric in metric_names:
-            if metric not in SUPPORTED_METRICS:
-                logger.warning(f"[FHE:{self.name}] Unknown metric '{metric}', skipping")
-                continue
-            results[metric] = round(SUPPORTED_METRICS[metric](y, y_pred, y_proba), 4)
+            if metric in SUPPORTED_METRICS:
+                results[metric] = round(SUPPORTED_METRICS[metric](y, y_pred, y_proba), 4)
 
-        logger.info(f"[FHE:{self.name}] Evaluation ({on}, fhe={fhe}): {results}")
         self._save_results(results, on, fhe)
         return results
-    
+
     @classmethod
     def load(cls, path: str) -> "FHEModel":
-        """Load a Concrete ML model from JSON file."""
         path = Path(path)
-
         with open(path, "r") as f:
             model_obj = cml_load(f)
 
-        # Create wrapper instance
-        instance = cls(name="loaded_fhe_model")  # placeholder name
+        instance = cls(name="loaded_fhe_model")
         instance.model = model_obj
-
-        logger.info(f"[FHE] Loaded model from {path}")
-
         return instance
-    
+
     def compile(self) -> None:
-        """Recompile loaded model (required for FHE execution/simulation)."""
         if self.X_train is None:
-            raise RuntimeError("Need training data to compile model")
-
-        logger.info(f"[FHE:{self.name}] Recompiling model...")
+            raise RuntimeError("Need training data")
         self.model.compile(self.X_train)
-
 
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _prepare_hyperparams(self, name: str, hyperparams: dict) -> dict:
-        """
-        Adapt hyperparams from models.yaml for Concrete ML constructors.
-        Strips sklearn-only params and adds n_bits for quantization.
-        """
         params = hyperparams.copy()
 
-        # Concrete ML models other than MLP accept n_bits for quantization precision
-        try:
-            params.setdefault("n_bits", 8)
-        except:
-            params.setdefault("module__n_w_bits", 8)
-            params.setdefault("module__n_a_bits", 8)
-            params.setdefault("module__n_accum_bits", 8)
-
+        # Remove sklearn-only params for MLP
         if name == "mlp":
-            # Strip sklearn-only params — Concrete ML uses module__* equivalents
             for key in _SKLEARN_ONLY:
                 params.pop(key, None)
+
+        fhe_params = self.fhe_cfg.get("models", {}).get(name, {})
+
+        if name != "mlp":
+            if "n_bits" in fhe_params:
+                params["n_bits"] = fhe_params["n_bits"]
+
+        else:
+            mapping = {
+                "n_w_bits": "module__n_w_bits",
+                "n_a_bits": "module__n_a_bits",
+                "n_accum_bits": "module__n_accum_bits",
+            }
+            for yaml_key, model_key in mapping.items():
+                if yaml_key in fhe_params:
+                    params[model_key] = fhe_params[yaml_key]
 
         return params
 
     def _save_model(self) -> None:
-        """Save model using Concrete ML JSON serialization."""
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
-        dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
+        dataset_to_use = self.save_dataset_name or self.dataset_name
         path = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}.json"
 
         with open(path, "w") as f:
             cml_dump(self.model, f)
 
-        logger.info(f"[FHE:{self.name}] Model saved (Concrete ML JSON) → {path}")
-
     def _save_results(self, results: dict, split: str, fhe: str) -> None:
-        results_dir = Path(self.cfg.get("output", {}).get("results_dir", "results"))
-        results_dir.mkdir(parents=True, exist_ok=True)
-        path = results_dir / f"fhe__{self.name}__{self.dataset_name}__{split}__metrics.json"
+        self.results_dir.mkdir(parents=True, exist_ok=True)
+
+        path = self.results_dir / f"fhe__{self.name}__{self.dataset_name}__{split}__metrics.json"
         with open(path, "w") as f:
             json.dump({
-                "mode":    self.mode,
-                "model":   self.name,
+                "mode": self.mode,
+                "model": self.name,
                 "dataset": self.dataset_name,
-                "split":   split,
-                "fhe":     fhe,
+                "split": split,
+                "fhe": fhe,
                 "metrics": results
             }, f, indent=2)
-        logger.info(f"[FHE:{self.name}] Results saved → {path}")
