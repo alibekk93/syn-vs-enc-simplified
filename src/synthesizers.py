@@ -56,9 +56,10 @@ class Synthesizer:
         self.name      = name
         self.cfg       = all_cfg
         self.synth_cfg = all_cfg[name]
+        self.split_cfg   = all_cfg.get("split", {})
         self.method    = self.synth_cfg["method"]
-        self.test_size     = self.synth_cfg.get("test_size", 0.0)
-        self.random_state  = self.synth_cfg.get("random_state", 42)
+        self.test_size     = self.split_cfg.get("test_size", None)
+        self.random_state  = self.split_cfg.get("random_state", 42)
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
@@ -94,19 +95,24 @@ class Synthesizer:
         self.n_rows_original = len(df)
 
         # --- Split ---
-        test_size = self.test_size
-        random_state = self.random_state
+        if self.test_size:
+            test_size = self.test_size
+            random_state = self.random_state
 
-        df_train, df_test = train_test_split(
-            df,
-            test_size=test_size,
-            random_state=random_state,
-            shuffle=True
-        )
+            df_train, df_test = train_test_split(
+                df,
+                test_size=test_size,
+                random_state=random_state,
+                shuffle=True
+            )
 
-        # Store splits
-        self.df_train = df_train.reset_index(drop=True)
-        self.df_test  = df_test.reset_index(drop=True)
+            # Store splits
+            self.df_train = df_train.reset_index(drop=True)
+            self.df_test  = df_test.reset_index(drop=True)
+        
+        else:
+            self.df_train = df.reset_index(drop=True)
+            self.df_test  = pd.DataFrame()  # Empty test set if no split
 
         # Use TRAIN ONLY for fitting
         self.df = self.df_train
