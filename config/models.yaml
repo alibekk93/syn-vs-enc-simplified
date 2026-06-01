@@ -53,12 +53,12 @@ models:
       random_state: 42
       eval_metric: logloss
 
-  - name: mlp
-    hyperparameters:
-      hidden_layer_sizes: [128, 64]
-      activation: relu
-      max_iter: 200
-      random_state: 42
+  # - name: mlp
+  #   hyperparameters:
+  #     hidden_layer_sizes: [128, 64]
+  #     activation: relu
+  #     max_iter: 200
+  #     random_state: 42
 
 metrics:
   - accuracy

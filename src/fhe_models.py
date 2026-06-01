@@ -212,7 +212,7 @@ class FHEModel:
                 "n_w_bits": "module__n_w_bits",
                 "n_a_bits": "module__n_a_bits",
                 "n_accum_bits": "module__n_accum_bits",
-                "n_layers": "n_layers",
+                "n_layers": "module__n_layers",
             }
             for yaml_key, model_key in mapping.items():
                 if yaml_key in fhe_params:
