@@ -48,23 +48,24 @@ class Synthesizer:
             cfg:  Path to synthesizers.yaml
         """
         all_cfg = load_config(cfg)
+        output_cfg             = all_cfg.get("output", {})
+        methods_cfg            = all_cfg.get("methods", {})
 
-        if name not in all_cfg:
-            available = [k for k in all_cfg if k != "output"]
+        if name not in methods_cfg:
+            available = [k for k in methods_cfg]
             raise KeyError(f"Synthesizer '{name}' not found in config. Available: {available}")
 
-        self.name      = name
-        self.cfg       = all_cfg
-        self.synth_cfg = all_cfg[name]
-        self.split_cfg   = all_cfg.get("split", {})
-        self.method    = self.synth_cfg["method"]
-        self.test_size     = self.split_cfg.get("test_size", None)
-        self.random_state  = self.split_cfg.get("random_state", 42)
+        self.name              = name
+        self.cfg               = all_cfg
+        self.synth_cfg         = methods_cfg[name]
+        self.split_cfg         = all_cfg.get("split", {})
+        self.method            = name
+        self.test_size         = self.split_cfg.get("test_size", None)
+        self.random_state      = self.split_cfg.get("random_state", 42)
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
-
-        output_cfg            = all_cfg.get("output", {})
+        
         self.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         self.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
 

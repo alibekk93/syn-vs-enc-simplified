@@ -32,7 +32,7 @@ def run(
         Nested dict of {dataset: {synthesizer: {model: metrics}}}
     """
     targets_datasets     = datasets     or list(load_config(DATASETS_CFG).keys())
-    targets_synthesizers = synthesizers or [k for k in load_config(SYNTHESIZERS_CFG) if k != "output"]
+    targets_synthesizers = synthesizers or [k for k in load_config(SYNTHESIZERS_CFG).get("methods", [])]
     targets_models       = models       or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
 
     logger.info(

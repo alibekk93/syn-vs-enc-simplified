@@ -34,11 +34,11 @@ output:
   synthetic_dir: data/processed
   synthesizers_dir: synthesizers
 
-gaussian_copula:
-  method: gaussian_copula
-  num_rows: same             # "same" matches original dataset size, or set an integer
-  parameters:
-    enforce_min_max_values: true
-    enforce_rounding: true
-    default_distribution: norm
-    numerical_distributions: {}
+methods:
+  gaussian_copula:
+    num_rows: same             # "same" matches original dataset size, or set an integer
+    parameters:
+      enforce_min_max_values: true
+      enforce_rounding: true
+      default_distribution: norm
+      numerical_distributions: {}
