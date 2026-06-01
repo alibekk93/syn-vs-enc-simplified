@@ -92,6 +92,7 @@ class Dataset:
 
         # --- Binarize target ---
         df = self._binarize_target(df, prep.get("binarize_target", {}))
+        df[self.target] = df[self.target].astype(int)
 
         # --- Numeric ---
         num_cfg  = prep.get("numeric", {})
