@@ -3,6 +3,7 @@
 ## TD
 - bootstrap: `results\bootstrap\`, `config\bootstrap.yaml`
 - visualization
+- check if ablation performs resource profiling; rename ablation output
 
 ## Abstract draft
 The increasing use of machine learning in healthcare has amplified concerns around the protection of sensitive patient information, particularly protected health information (PHI). Privacy-preserving approaches such as synthetic data generation and secure computation have emerged as promising solutions, yet their relative trade-offs in predictive performance and computational efficiency remain insufficiently characterized. In this work, we present a unified experimental framework for systematically comparing these approaches on tabular healthcare datasets.
