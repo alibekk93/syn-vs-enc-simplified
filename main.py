@@ -18,6 +18,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+try:
+    import torch
+    cuda_available = torch.cuda.is_available()
+    logging.info(f"[Torch] CUDA available: {cuda_available}")
+    if cuda_available:
+        logging.info(f"[Torch] Using GPU: {torch.cuda.get_device_name(0)}")
+except ImportError:
+    logging.info("[Torch] PyTorch not installed — skipping CUDA check")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
