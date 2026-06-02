@@ -1,6 +1,32 @@
 # =============================================================================
 # fhe.yaml — FHE Quantization Configuration
 # =============================================================================
+#
+# Controls quantization parameters for Fully Homomorphic Encryption (FHE)
+# models using Concrete ML.
+#
+# MODELS:
+#   Each key corresponds to a model name defined in models.yaml.
+#   Parameters here override or extend model hyperparameters specifically
+#   for FHE execution.
+#
+#   Common parameters:
+#     n_bits        Number of quantization bits for weights/inputs
+#                   (lower = faster, less accurate; higher = slower, more accurate)
+#
+#   MLP-SPECIFIC PARAMETERS (if enabled):
+#     n_w_bits      Bit-width for weights
+#     n_a_bits      Bit-width for activations
+#     n_accum_bits  Bit-width for accumulators
+#     n_layers      Number of quantized layers
+#
+# NOTES:
+#   - Only models supported by Concrete ML can be used in FHE mode.
+#   - Lower bit precision improves performance but may degrade accuracy.
+#   - These settings affect both simulate and execute modes.
+#   - If a parameter is missing, model defaults or library defaults are used.
+#
+# =============================================================================
 
 models:
 
@@ -14,7 +40,7 @@ models:
     n_bits: 2
 
   # mlp:
-  #   n_w_bits: 3
-  #   n_a_bits: 3
-  #   n_accum_bits: 3
+  #   n_w_bits: 2
+  #   n_a_bits: 2
+  #   n_accum_bits: 2
   #   n_layers: 2

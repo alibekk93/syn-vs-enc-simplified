@@ -68,5 +68,5 @@ metrics:
   - roc_auc
 
 output:
-  results_dir: results
+  results_dir: results/metrics
   models_dir: models

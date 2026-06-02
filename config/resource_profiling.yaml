@@ -1,3 +1,44 @@
+# =============================================================================
+# resource_profiling.yaml — Resource Profiling Configuration
+# =============================================================================
+#
+# Controls runtime resource tracking (time, memory, storage, FHE) across all
+# pipelines. Used by ResourceProfiler to monitor performance and optionally
+# persist results to disk.
+#
+# GLOBAL:
+#   enabled        Master switch for all profiling. If false, all tracking
+#                  and saving is disabled regardless of sub-settings.
+#
+# PROFILING TYPES:
+#   time:
+#     enabled      Track wall-clock time for training blocks and inference.
+#
+#   memory:
+#     enabled      Track memory usage (RSS sampling + fallback tracing).
+#
+#   storage:
+#     enabled      Track model/data file sizes and derived ratios.
+#
+#   fhe:
+#     enabled      Track FHE-specific metrics (e.g., circuit complexity).
+#
+# LOGGING:
+#   save            If true, profiling results are written to disk as JSON.
+#   output_dir      Directory where profiling outputs are stored.
+#                   Files are saved as:
+#                       {output_dir}/{label}.json
+#                   where label is provided by each pipeline (e.g.
+#                       "standard__logistic_regression__heart_disease").
+#
+# NOTES:
+#   - Profiling runs independently of model metrics (stored in results_dir).
+#   - Disabling individual sections reduces overhead during experimentation.
+#   - Memory sampling uses a background thread; very fast operations may fall
+#     back to tracemalloc-based snapshots.
+#
+# =============================================================================
+
 enabled: true
 
 time:
@@ -15,4 +56,3 @@ fhe:
 logging:
   save: true
   output_dir: results/resource_profiles
-  
