@@ -10,7 +10,7 @@ import argparse
 import logging
 
 from src.utils import load_config
-from pipelines import preprocessing, standard, synthetic, fhe
+from pipelines import preprocessing, standard, synthetic, fhe, ablation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,8 +53,20 @@ if __name__ == "__main__":
         logger.info("=== Synthetic ===")
         synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
 
-    if pipelines.get("fhe"):
+    if pipelines.get("ablation"):
+        logger.info("=== FHE (Ablation) ===")
+        ablation.run(
+            datasets=datasets,
+            models=models,
+            fhe_mode=fhe_mode
+        )
+
+    elif pipelines.get("fhe"):
         logger.info("=== FHE ===")
-        fhe.run(datasets=datasets, models=models, fhe_mode=fhe_mode)
+        fhe.run(
+            datasets=datasets,
+            models=models,
+            fhe_mode=fhe_mode
+        )
 
     logger.info("=== Full pipeline complete ===")

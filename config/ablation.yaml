@@ -1,0 +1,13 @@
+# config/ablation.yaml
+fhe:
+  n_bits:
+    start: 2      # fallback from fhe.yaml if omitted
+    end: 8        # inclusive
+    step: 1
+
+# OR explicit override:
+# fhe:
+#   n_bits: [2, 3, 4, 6, 8]
+
+output:
+  dir: results/ablation

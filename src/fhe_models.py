@@ -240,5 +240,6 @@ class FHEModel:
                 "dataset": self.dataset_name,
                 "split": split,
                 "fhe": fhe,
-                "metrics": results
+                "metrics": results,
+                "n_bits": self.fhe_cfg.get("models", {}).get(self.name, {}).get("n_bits")
             }, f, indent=2)

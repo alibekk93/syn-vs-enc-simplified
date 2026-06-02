@@ -33,3 +33,4 @@ pipelines:
   raw:           true
   synthetic:     false
   fhe:           false
+  ablation:      false

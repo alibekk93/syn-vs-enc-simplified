@@ -17,3 +17,4 @@ pipelines:
   raw:           true
   synthetic:     true
   fhe:           true
+  ablation:      false

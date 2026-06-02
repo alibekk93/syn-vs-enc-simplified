@@ -17,6 +17,7 @@ def run(
     datasets: list[str] | None = None,
     models:   list[str] | None = None,
     fhe_mode: str = "simulate",
+    fhe_config_override=None,
 ) -> dict:
     """
     Args:
@@ -29,7 +30,7 @@ def run(
     """
     targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
-    fhe_config       = load_config(FHE_CFG)
+    fhe_config       = fhe_config_override or load_config(FHE_CFG)
 
     logger.info(f"FHE pipeline started — datasets: {targets_datasets}, models: {targets_models}, fhe_mode: {fhe_mode}")
 
@@ -90,7 +91,8 @@ def run(
                 }
 
                 # Persist profiling results to disk.
-                profiler.save(f"fhe__{model_name}__{dataset_name}")
+                n_bits = fhe_config.get("models", {}).get(model_name, {}).get("n_bits")
+                profiler.save(f"fhe__{model_name}__{dataset_name}__n{n_bits}")
                 profiler.reset()
 
             except Exception as e:
