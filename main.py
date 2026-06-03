@@ -53,14 +53,6 @@ if __name__ == "__main__":
         logger.info("=== Synthetic ===")
         synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
 
-    if pipelines.get("ablation"):
-        logger.info("=== FHE (Ablation) ===")
-        ablation.run(
-            datasets=datasets,
-            models=models,
-            fhe_mode=fhe_mode
-        )
-
     if pipelines.get("fhe"):
         fhe.run(
             datasets=datasets,

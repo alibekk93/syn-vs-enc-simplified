@@ -1,43 +1,77 @@
 # =============================================================================
-# fhe.yaml — FHE Quantization Configuration
+# fhe.yaml — FHE Quantization & Sweep Configuration
 # =============================================================================
 #
-# Controls quantization parameters for Fully Homomorphic Encryption (FHE)
-# models using Concrete ML.
+# Controls quantization parameters and optional parameter sweeps for
+# Fully Homomorphic Encryption (FHE) models using Concrete ML.
 #
-# MODELS:
-#   Each key corresponds to a model name defined in models.yaml.
-#   Parameters here override or extend model hyperparameters specifically
-#   for FHE execution.
+# OVERVIEW:
+#   - This file now fully controls both:
+#       1. Standard FHE execution
+#       2. Ablation-style experiments (via parameter sweeps)
+#   - The separate ablation pipeline has been removed.
 #
-#   Common parameters:
-#     n_bits        Number of quantization bits for weights/inputs
-#                   (lower = faster, less accurate; higher = slower, more accurate)
 #
-#   MLP-SPECIFIC PARAMETERS (if enabled):
-#     n_w_bits      Bit-width for weights
-#     n_a_bits      Bit-width for activations
-#     n_accum_bits  Bit-width for accumulators
-#     n_layers      Number of quantized layers
+# -----------------------------------------------------------------------------
+# SWEEP (ABSTRACTION OF ABLATION)
+# -----------------------------------------------------------------------------
+# Enables iterative runs over multiple n_bits values.
 #
-# NOTES:
-#   - Only models supported by Concrete ML can be used in FHE mode.
-#   - Lower bit precision improves performance but may degrade accuracy.
-#   - These settings affect both simulate and execute modes.
-#   - If a parameter is missing, model defaults or library defaults are used.
+# If enabled:
+#   - The FHE pipeline will run once per n_bits value.
+#   - Each run is independently trained, evaluated, and profiled.
+#   - Results are saved with n_bits included in filenames.
 #
-# =============================================================================
+# Supported formats:
+#
+#   Range:
+#     start / end (inclusive) with optional step
+#
+#   Explicit list:
+#     n_bits: [2, 3, 4, 6, 8]
+#
+# Behavior:
+#   - If enabled: overrides all model n_bits values
+#   - If disabled: uses per-model n_bits below
+#   - If start == end: only one run is executed
+#
+# Output:
+#   - Metrics → results/metrics/
+#   - Profiling → results/resource_profiles/
+#
+# -----------------------------------------------------------------------------
 
 sweep:
   enabled: true
-  n_bits:       # n_bits: [2, 3, 4, 6, 8] is also allowed
+
+  # Option 1: range
+  n_bits:
     start: 2
     end: 8
     step: 1
 
+  # Option 2: explicit list (alternative)
+  # n_bits: [2, 3, 4, 6, 8]
+
+
+# -----------------------------------------------------------------------------
+# MODELS
+# -----------------------------------------------------------------------------
+# Per-model FHE quantization configuration.
+#
+# These settings are:
+#   - Used ONLY if sweep.enabled = false
+#   - Otherwise overridden by sweep iteration values
+#
+# Each key corresponds to a model in config/models.yaml
+#
+# -----------------------------------------------------------------------------
+
 models:
+
   logistic_regression:
-    n_bits: 2   # fallback if sweep disabled
+    # Number of quantization bits
+    n_bits: 2
 
   random_forest:
     n_bits: 2
@@ -45,8 +79,41 @@ models:
   xgboost:
     n_bits: 2
 
+  # ---------------------------------------------------------------------------
+  # MLP-SPECIFIC PARAMETERS (optional)
+  # ---------------------------------------------------------------------------
+  # Used only for the NeuralNetClassifier in Concrete ML
+  #
   # mlp:
-  #   n_w_bits: 2
-  #   n_a_bits: 2
-  #   n_accum_bits: 2
-  #   n_layers: 2
+  #   n_w_bits: 2        # weight quantization
+  #   n_a_bits: 2        # activation quantization
+  #   n_accum_bits: 2    # accumulator precision
+  #   n_layers: 2        # number of quantized layers
+
+
+# -----------------------------------------------------------------------------
+# NOTES
+# -----------------------------------------------------------------------------
+#
+# - Only models supported by Concrete ML can be used in FHE mode.
+#
+# - Sweep mode enables systematic exploration of this trade-off.
+#
+# - All runs (sweep or single) automatically:
+#       - compute evaluation metrics
+#       - perform resource profiling (time, memory, storage, FHE complexity)
+#
+# - Output files include n_bits in their names, ensuring:
+#       - no overwriting
+#       - reproducibility
+#       - easy comparison
+#
+# Example output filenames:
+#
+#   results/metrics/
+#     fhe__logistic_regression__heart_disease__n2__test__metrics.json
+#
+#   results/resource_profiles/
+#     fhe__logistic_regression__heart_disease__n2.json
+#
+# -----------------------------------------------------------------------------

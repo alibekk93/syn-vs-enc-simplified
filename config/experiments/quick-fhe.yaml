@@ -1,0 +1,19 @@
+# =============================================================================
+# quick-fhe.yaml — Quick Run Configuration
+# =============================================================================
+#
+# Minimal subset for fast fhe testing — one dataset, one model, one synthesizer,
+# FHE in execute mode.
+#
+# =============================================================================
+
+datasets:     [heart_disease]
+models:       [logistic_regression]
+synthesizers: [gaussian_copula]
+fhe_mode:     execute
+
+pipelines:
+  preprocessing: true
+  raw:           true
+  synthetic:     true
+  fhe:           true
