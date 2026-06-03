@@ -28,10 +28,16 @@
 #
 # =============================================================================
 
-models:
+sweep:
+  enabled: true
+  n_bits:       # n_bits: [2, 3, 4, 6, 8] is also allowed
+    start: 2
+    end: 8
+    step: 1
 
+models:
   logistic_regression:
-    n_bits: 2
+    n_bits: 2   # fallback if sweep disabled
 
   random_forest:
     n_bits: 2

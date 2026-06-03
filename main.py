@@ -10,7 +10,7 @@ import argparse
 import logging
 
 from src.utils import load_config
-from pipelines import preprocessing, standard, synthetic, fhe, ablation
+from pipelines import preprocessing, standard, synthetic, fhe
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,8 +61,7 @@ if __name__ == "__main__":
             fhe_mode=fhe_mode
         )
 
-    elif pipelines.get("fhe"):
-        logger.info("=== FHE ===")
+    if pipelines.get("fhe"):
         fhe.run(
             datasets=datasets,
             models=models,

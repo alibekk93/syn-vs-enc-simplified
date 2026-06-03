@@ -232,7 +232,11 @@ class FHEModel:
     def _save_results(self, results: dict, split: str, fhe: str) -> None:
         self.results_dir.mkdir(parents=True, exist_ok=True)
 
-        path = self.results_dir / f"fhe__{self.name}__{self.dataset_name}__{split}__metrics.json"
+        n_bits = self.fhe_cfg.get("models", {}).get(self.name, {}).get("n_bits")
+
+        path = self.results_dir / (
+            f"fhe_{n_bits}__{self.name}__{self.dataset_name}__{split}__metrics.json"
+        )
         with open(path, "w") as f:
             json.dump({
                 "mode": self.mode,
