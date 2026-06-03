@@ -60,4 +60,8 @@ if __name__ == "__main__":
             fhe_mode=fhe_mode
         )
 
+    logger.info("=== Creating visualizations ===")
+    from src.visualization import generate_all_figures
+    generate_all_figures()
+
     logger.info("=== Full pipeline complete ===")

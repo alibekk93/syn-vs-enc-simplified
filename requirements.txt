@@ -5,3 +5,5 @@ PyYAML
 xgboost
 sdv
 concrete-ml
+seaborn
+matplotlib
