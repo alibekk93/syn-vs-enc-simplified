@@ -210,7 +210,7 @@ def plot_performance_grid(df, metric, save_dir=FIGURES_DIR):
 
 
 # ===========================================================
-# TRADEOFF PLOTS
+# PARETO TRADEOFF PLOTS
 # ===========================================================
 
 RESOURCE_MAP = {
@@ -219,28 +219,87 @@ RESOURCE_MAP = {
     "memory": ("mem_inf_peak", "Peak Inference Memory (MB)"),
 }
 
+def compute_pareto_front(df, x_col, y_col):
+    """
+    Returns subset of df that lies on the Pareto frontier.
+    
+    We assume:
+        - Minimize x (resource)
+        - Maximize y (metric)
+    """
+    # Sort by resource (ascending), then metric (descending)
+    df_sorted = df.sort_values(by=[x_col, y_col], ascending=[True, False])
+    pareto_points = []
+    best_so_far = -float("inf")
+    for _, row in df_sorted.iterrows():
+        if row[y_col] > best_so_far:
+            pareto_points.append(row)
+            best_so_far = row[y_col]
+    pareto_df = pd.DataFrame(pareto_points)
+    return pareto_df
 
 def plot_tradeoff(df, metric, resource_key, save_dir=FIGURES_DIR):
+
     col, label = RESOURCE_MAP[resource_key]
+
     for dataset in df["dataset"].unique():
+
         subset = df[df["dataset"] == dataset]
         subset = subset.dropna(subset=[col, metric])
+
         if subset.empty:
             continue
+
         plt.figure(figsize=(7, 5))
 
+        # -------------------------------------------------------
+        # BASE PLOT
+        # -------------------------------------------------------
         sns.scatterplot(
             data=subset,
             x=col,
             y=metric,
             hue="mode_pretty",
             style="model",
-            s=100
+            s=100,
+            alpha=0.8
         )
 
-        # log scale
         plt.xscale("log")
 
+        # -------------------------------------------------------
+        # PARETO FRONTIER
+        # -------------------------------------------------------
+        pareto_df = compute_pareto_front(subset, col, metric)
+
+        if not pareto_df.empty:
+
+            # sort for line plotting
+            pareto_df = pareto_df.sort_values(by=col)
+
+            # highlight Pareto points
+            plt.scatter(
+                pareto_df[col],
+                pareto_df[metric],
+                color="black",
+                s=140,
+                facecolors="none",
+                linewidths=1.8,
+                label="Pareto Optimal"
+            )
+
+            # connect points
+            plt.plot(
+                pareto_df[col],
+                pareto_df[metric],
+                color="black",
+                linestyle="--",
+                linewidth=1.2
+            )
+
+        # -------------------------------------------------------
+        # FINAL STYLING
+        # -------------------------------------------------------
         plt.title(f"{format_metric_name(metric)} vs {label} — {dataset}")
 
         plt.xlabel(label)
