@@ -68,8 +68,12 @@ class FHEModel:
         self.name      = name
         self.cfg       = all_cfg
         self.model_cfg = model_cfgs[name]
-        self.mode      = mode
         self.fhe_cfg   = fhe_cfg or {}
+        n_bits = self.fhe_cfg.get("models", {}).get(self.name, {}).get("n_bits")
+        if n_bits is not None:
+            self.mode = f"fhe_{n_bits}"
+        else:
+            self.mode = mode
 
         output_cfg       = all_cfg.get("output", {})
         self.results_dir = Path(output_cfg.get("results_dir", "results"))

@@ -64,13 +64,12 @@ def run(
                     synth.save()
 
                 synth_profiler.stop_memory_sampling()
+                synth_profiler.save(f"{synth_name}__{dataset_name}__synthesis")
 
                 if skip_training:
                     results[dataset_name][synth_name] = {
                         "synthesis": synth_profiler.export()
                     }
-                    # Save even in skip_training path.
-                    synth_profiler.save(f"synthetic__{synth_name}__{dataset_name}__synthesis")
                     continue
 
                 synthetic_dataset = f"{synth_name}__{dataset_name}"
