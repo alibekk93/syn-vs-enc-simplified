@@ -1,7 +1,8 @@
 # syn-vs-enc-simplified
 
 ## TD
-- bootstrap: `results\bootstrap\`, `config\bootstrap.yaml`
+- DRAC Fir check
+- bootstrap: create an array of random seeds -> resample -> evaluate
 - visualizations: color consistency; multi-panel figures; radar plots; dynamic pareto?
 
 ## Abstract draft
