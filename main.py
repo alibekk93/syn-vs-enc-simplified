@@ -98,7 +98,6 @@ def run_single_bootstrap(config_path: str, seed: int):
     cfg          = load_config(config_path)
     datasets     = cfg.get("datasets")
     models       = cfg.get("models")
-    evaluation   = cfg.get("evaluation", {})  # optional if you store eval config
 
     logger.info(
         f"=== Running single bootstrap "
@@ -109,7 +108,6 @@ def run_single_bootstrap(config_path: str, seed: int):
         datasets=datasets,
         models=models,
         seed=seed,
-        # evaluation=evaluation,
     )
 
     logger.info("=== Single bootstrap run complete ===")
