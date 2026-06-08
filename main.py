@@ -131,7 +131,6 @@ def generate_seeds(seed: int, length: int):
     with open("bootstrap_seeds.txt", "w") as f:
         for s in seeds:
             f.write(f"{s}\n")
-        f.write(f"{s}\n")
     logger.info(f"Generated {length} seeds and saved to bootstrap_seeds.txt")
 
 # --------------------------------------------------
