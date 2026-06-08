@@ -74,6 +74,9 @@ def run(
     models:   list[str] | None = None,
     fhe_mode: str = "simulate",
     fhe_config_override=None,
+    datasets_config: str = "config/datasets.yaml",
+    resource_config: str = "config/resource_profiling.yaml",
+    models_config: str = "config/models.yaml",
 ) -> dict:
     """
     Runs FHE pipeline with optional n_bits sweep.
@@ -93,8 +96,8 @@ def run(
             }
     """
 
-    targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
-    targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
+    targets_datasets = datasets or list(load_config(datasets_config).keys())
+    targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
     base_fhe_cfg = fhe_config_override or load_config(FHE_CFG)
     n_bits_values = _expand_n_bits(base_fhe_cfg)
@@ -124,12 +127,12 @@ def run(
 
                 logger.info(f"--- FHE {model_name} on {dataset_name} (n_bits={n_bits}) ---")
 
-                profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+                profiler = ResourceProfiler(load_config(resource_config))
 
                 try:
                     model = FHEModel(
                         model_name,
-                        cfg=MODELS_CFG,
+                        cfg=models_config,
                         mode="fhe",
                         fhe_cfg=fhe_config,
                     )
@@ -140,7 +143,7 @@ def run(
                     profiler.start_memory_sampling(phase="training")
 
                     with profiler.time_block("data_loading"):
-                        model.load_data(dataset_name)
+                        model.load_data(dataset_name, dataset_cfg=datasets_config)
                         model.split()
 
                     with profiler.time_block("training_fit"):

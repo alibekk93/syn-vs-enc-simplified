@@ -13,17 +13,20 @@ MODELS_CFG   = "config/models.yaml"
 RESOURCE_CFG = "config/resource_profiling.yaml"
 
 
-def run(datasets: list[str] | None = None, models: list[str] | None = None) -> dict:
+def run(datasets: list[str] | None = None, models: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml", models_config: str = "config/models.yaml") -> dict:
     """
     Args:
         datasets: List of dataset names (default: all).
         models:   List of model names (default: all in config).
+        datasets_config: Path to datasets configuration file.
+        resource_config: Path to resource profiling configuration file.
+        models_config: Path to models configuration file.
 
     Returns:
         Nested dict of {dataset: {model: metrics}}
     """
-    targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
-    targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
+    targets_datasets = datasets or list(load_config(datasets_config).keys())
+    targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
     logger.info(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
 
@@ -33,17 +36,17 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None) -> d
         for model_name in targets_models:
             logger.info(f"--- {model_name} on {dataset_name} ---")
 
-            profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+            profiler = ResourceProfiler(load_config(resource_config))
 
             try:
-                model = Model(model_name, cfg=MODELS_CFG, mode="standard")
+                model = Model(model_name, cfg=models_config, mode="standard")
 
                 # Explicit phase labels so training and inference
                 # memory snapshots are stored separately.
                 profiler.start_memory_sampling(phase="training")
 
                 with profiler.time_block("data_loading"):
-                    model.load_data(dataset_name)
+                    model.load_data(dataset_name, dataset_cfg=datasets_config)
                     model.split()
 
                 with profiler.time_block("training"):

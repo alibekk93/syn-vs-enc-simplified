@@ -20,6 +20,10 @@ def run(
     synthesizers:  list[str] | None = None,
     models:        list[str] | None = None,
     skip_training: bool = False,
+    datasets_config: str = "config/datasets.yaml",
+    resource_config: str = "config/resource_profiling.yaml",
+    models_config: str = "config/models.yaml",
+    synthesizers_config: str = "config/synthesizers.yaml",
 ) -> dict:
     """
     Args:
@@ -27,13 +31,17 @@ def run(
         synthesizers:  List of synthesizer names (default: all in config).
         models:        List of model names (default: all in config).
         skip_training: If True, only synthesize data without training models.
+        datasets_config: Path to datasets configuration file.
+        resource_config: Path to resource profiling configuration file.
+        models_config: Path to models configuration file.
+        synthesizers_config: Path to synthesizers configuration file.
 
     Returns:
         Nested dict of {dataset: {synthesizer: {model: metrics}}}
     """
-    targets_datasets     = datasets     or list(load_config(DATASETS_CFG).keys())
-    targets_synthesizers = synthesizers or [k for k in load_config(SYNTHESIZERS_CFG).get("methods", [])]
-    targets_models       = models       or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
+    targets_datasets     = datasets     or list(load_config(datasets_config).keys())
+    targets_synthesizers = synthesizers or [k for k in load_config(synthesizers_config).get("methods", [])]
+    targets_models       = models       or [m["name"] for m in load_config(models_config).get("models", [])]
 
     logger.info(
         f"Synthetic pipeline started — datasets: {targets_datasets}, "
@@ -49,16 +57,16 @@ def run(
             logger.info(f"--- Synthesizing: {synth_name} on {dataset_name} ---")
 
             # Create profiler before the try block.
-            synth_profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+            synth_profiler = ResourceProfiler(load_config(resource_config))
 
             try:
-                synth = Synthesizer(synth_name, cfg=SYNTHESIZERS_CFG)
+                synth = Synthesizer(synth_name, cfg=synthesizers_config)
 
                 # Explicit phase label.
                 synth_profiler.start_memory_sampling(phase="synthesis")
 
                 with synth_profiler.time_block("synthesis"):
-                    synth.load_data(dataset_name, dataset_cfg=DATASETS_CFG)
+                    synth.load_data(dataset_name, dataset_cfg=datasets_config)
                     synth.fit()
                     synth.sample()
                     synth.save()
@@ -77,16 +85,16 @@ def run(
                     logger.info(f"--- {model_name} on synthetic {synthetic_dataset} ---")
 
                     # Create per-model profiler before the inner try block.
-                    train_profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+                    train_profiler = ResourceProfiler(load_config(resource_config))
 
                     try:
-                        model = Model(model_name, cfg=MODELS_CFG, mode=synth_name)
+                        model = Model(model_name, cfg=models_config, mode=synth_name)
 
                         # Explicit phase labels.
                         train_profiler.start_memory_sampling(phase="training")
 
                         with train_profiler.time_block("data_loading"):
-                            model.load_data(synthetic_dataset, dataset_cfg=DATASETS_CFG)
+                            model.load_data(synthetic_dataset, dataset_cfg=datasets_config)
                             model.save_dataset_name = dataset_name
                             model.split()
 

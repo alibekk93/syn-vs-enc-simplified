@@ -73,7 +73,12 @@ class Dataset:
 
     def load(self) -> pd.DataFrame:
         """Load raw CSV and assign column names from config."""
-        path = self.RAW_DIR / f"{self.name}.csv"
+        # Determine raw data path: either explicit raw_path in config or default location.
+        raw_path_cfg = self.cfg.get("raw_path")
+        if raw_path_cfg:
+            path = Path(raw_path_cfg)
+        else:
+            path = self.RAW_DIR / f"{self.name}.csv"
         logger.info(f"[{self.name}] Loading from {path}")
         df = pd.read_csv(path)
 

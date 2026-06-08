@@ -11,25 +11,27 @@ DATASETS_CFG = "config/datasets.yaml"
 RESOURCE_CFG = "config/resource_profiling.yaml"
 
 
-def run(datasets: list[str] | None = None) -> dict:
+def run(datasets: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml") -> dict:
     """
     Args:
         datasets: List of dataset names to process. If None, all datasets are processed.
+        datasets_config: Path to datasets configuration file.
+        resource_config: Path to resource profiling configuration file.
 
     Returns:
         Dict of {dataset: processing_results}
     """
-    targets = datasets or list(load_config(DATASETS_CFG).keys())
+    targets = datasets or list(load_config(datasets_config).keys())
     logger.info(f"Preprocessing pipeline started — datasets: {targets}")
 
     results = {}
     for name in targets:
         logger.info(f"--- Processing: {name} ---")
 
-        profiler = ResourceProfiler(load_config(RESOURCE_CFG))
+        profiler = ResourceProfiler(load_config(resource_config))
 
         try:
-            dataset = Dataset(name, cfg=DATASETS_CFG)
+            dataset = Dataset(name, cfg=datasets_config)
 
             # Only one memory phase in preprocessing (no separate inference).
             profiler.start_memory_sampling(phase="processing")
