@@ -109,7 +109,7 @@ def run_single_bootstrap(config_path: str, seed: int):
         datasets=datasets,
         models=models,
         seed=seed,
-        evaluation=evaluation,
+        # evaluation=evaluation,
     )
 
     logger.info("=== Single bootstrap run complete ===")
