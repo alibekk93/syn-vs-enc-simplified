@@ -37,8 +37,12 @@ models/
 *.log
 *.tmp
 *.bak
+tmp/
+logs/
+jobs/
 
 # --- IDE / OS ---
 .vscode/
 .idea/
 .DS_Store
+.claude/
