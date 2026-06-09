@@ -99,6 +99,7 @@ def run(
     models: list[str] | None = None,
     seed: int = 42,
     evaluation: dict | None = None,
+    fhe_mode: str = "simulate",
 ) -> dict:
     """
     Bootstrap evaluation pipeline that resamples data and runs full experiment pipeline.
@@ -203,7 +204,8 @@ def run(
                 models=targets_models,
                 datasets_config=str(configs["datasets"]),
                 resource_config=str(configs["resource"]),
-                models_config=str(configs["models"])
+                models_config=str(configs["models"]),
+                fhe_mode=fhe_mode,
             )
 
             # Collect results

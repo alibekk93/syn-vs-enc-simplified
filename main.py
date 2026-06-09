@@ -98,6 +98,7 @@ def run_single_bootstrap(config_path: str, seed: int):
     cfg          = load_config(config_path)
     datasets     = cfg.get("datasets")
     models       = cfg.get("models")
+    fhe_mode     = cfg.get("fhe_mode", "simulate")
 
     logger.info(
         f"=== Running single bootstrap "
@@ -108,6 +109,7 @@ def run_single_bootstrap(config_path: str, seed: int):
         datasets=datasets,
         models=models,
         seed=seed,
+        fhe_mode=fhe_mode,
     )
 
     logger.info("=== Single bootstrap run complete ===")
