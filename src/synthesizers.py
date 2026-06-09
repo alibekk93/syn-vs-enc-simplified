@@ -13,6 +13,7 @@ from sklearn.model_selection import train_test_split
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
+logging.getLogger("sdv").setLevel(logging.WARNING)
 
 SUPPORTED_SYNTHESIZERS = {
     "gaussian_copula": GaussianCopulaSynthesizer,
@@ -75,7 +76,7 @@ class Synthesizer:
         self.synthesizer: Optional[object]  = None
         self.df: Optional[pd.DataFrame]     = None
 
-        logger.info(f"[{self.name}] Initialized with method='{self.method}'")
+        logger.debug(f"[{self.name}] Initialized with method='{self.method}'")
 
     # ------------------------------------------------------------------
     # Public API
@@ -88,7 +89,7 @@ class Synthesizer:
         Additionally, splits the dataset into train/test.
         """
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.info(f"[{self.name}] Loading data from {path}")
+        logger.debug(f"[{self.name}] Loading data from {path}")
         df = pd.read_csv(path)
 
         # Store dataset name and original size (BEFORE split)
@@ -118,7 +119,7 @@ class Synthesizer:
         # Use TRAIN ONLY for fitting
         self.df = self.df_train
 
-        logger.info(
+        logger.debug(
             f"[{self.name}] Loaded {self.n_rows_original} rows "
             f"(train={len(self.df_train)}, test={len(self.df_test)})"
         )
@@ -137,7 +138,7 @@ class Synthesizer:
             raise RuntimeError("Call load_data() before fit()")
 
         metadata = Metadata.detect_from_dataframe(self.df)
-        logger.info(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
+        logger.debug(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
 
         params = self.synth_cfg.get("parameters") or {}
         if not params.get("numerical_distributions"):
@@ -145,9 +146,9 @@ class Synthesizer:
 
         self.synthesizer = SUPPORTED_SYNTHESIZERS[self.method](metadata, **params)
 
-        logger.info(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
+        logger.debug(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
         self.synthesizer.fit(self.df)
-        logger.info(f"[{self.name}] Fitting complete")
+        logger.debug(f"[{self.name}] Fitting complete")
 
     def sample(self, num_rows: Optional[Union[int, str]] = None) -> pd.DataFrame:
         """
@@ -167,9 +168,9 @@ class Synthesizer:
         if num_rows == "same":
             num_rows = self.n_rows_original
 
-        logger.info(f"[{self.name}] Sampling {num_rows} rows...")
+        logger.debug(f"[{self.name}] Sampling {num_rows} rows...")
         synthetic_df = self.synthesizer.sample(num_rows=num_rows)
-        logger.info(f"[{self.name}] Sampling complete")
+        logger.debug(f"[{self.name}] Sampling complete")
 
         self._save_synthetic(synthetic_df)
         return synthetic_df
@@ -183,7 +184,7 @@ class Synthesizer:
         path = self.synthesizers_dir / f"{self.name}__{self.dataset_name}.pkl"
         self.synthesizer._n_rows_original = self.n_rows_original
         self.synthesizer.save(str(path))
-        logger.info(f"[{self.name}] Synthesizer saved → {path}")
+        logger.debug(f"[{self.name}] Synthesizer saved → {path}")
 
     @classmethod
     def load(cls, path: str, cfg: str = "config/synthesizers.yaml") -> "Synthesizer":
@@ -203,7 +204,7 @@ class Synthesizer:
         instance.synthesizer     = SUPPORTED_SYNTHESIZERS[instance.method].load(str(path))
         instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
 
-        logger.info(f"[{name}] Loaded from {path}")
+        logger.debug(f"[{name}] Loaded from {path}")
         return instance
 
     # ------------------------------------------------------------------
@@ -214,4 +215,4 @@ class Synthesizer:
         self.synthetic_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthetic_dir / f"{self.name}__{self.dataset_name}.csv"
         df.to_csv(path, index=False)
-        logger.info(f"[{self.name}] Synthetic data saved → {path}")
+        logger.debug(f"[{self.name}] Synthetic data saved → {path}")

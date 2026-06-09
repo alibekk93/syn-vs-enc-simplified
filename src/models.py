@@ -111,7 +111,7 @@ class Model:
         # For saving: if set, overrides self.dataset_name in the saved filename/path
         self.save_dataset_name: Optional[str]     = None
 
-        logger.info(f"[{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
+        logger.debug(f"[{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
 
     # ------------------------------------------------------------------
     # Public API
@@ -123,7 +123,7 @@ class Model:
         model = joblib.load(path)
         if not isinstance(model, cls):
             raise TypeError(f"Expected a Model instance, got {type(model)}")
-        logger.info(f"[{model.name}] Loaded from {path}")
+        logger.debug(f"[{model.name}] Loaded from {path}")
         return model
 
     def run(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> dict:
@@ -138,7 +138,7 @@ class Model:
         For synthetic datasets (named '<synth>__<original>'), uses the original dataset's config.
         """
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.info(f"[{self.name}] Loading data from {path}")
+        logger.debug(f"[{self.name}] Loading data from {path}")
         self.df = pd.read_csv(path)
 
         ds_cfg = load_config(dataset_cfg)
@@ -158,7 +158,7 @@ class Model:
             else:
                 raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
 
-        logger.info(f"[{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
+        logger.debug(f"[{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
     def split(self) -> None:
         """Split loaded data into train and test sets."""
@@ -177,16 +177,16 @@ class Model:
             stratify=y if stratify else None
         )
 
-        logger.info(f"[{self.name}] Split → train={len(self.X_train)}, test={len(self.X_test)}")
+        logger.debug(f"[{self.name}] Split → train={len(self.X_train)}, test={len(self.X_test)}")
 
     def train(self) -> None:
         """Fit the model on the training set."""
         if self.X_train is None:
             raise RuntimeError("Call split() before train()")
 
-        logger.info(f"[{self.name}] Training...")
+        logger.debug(f"[{self.name}] Training...")
         self.model.fit(self.X_train, self.y_train)
-        logger.info(f"[{self.name}] Training complete")
+        logger.debug(f"[{self.name}] Training complete")
         self._save_model()
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
@@ -231,7 +231,7 @@ class Model:
                 continue
             results[metric] = round(SUPPORTED_METRICS[metric](y, y_pred, y_proba), 4)
 
-        logger.info(f"[{self.name}] Evaluation ({on}): {results}")
+        logger.debug(f"[{self.name}] Evaluation ({on}): {results}")
         self._save_results(results, on)
         return results
 
@@ -244,7 +244,7 @@ class Model:
         dataset_to_use = self.save_dataset_name if self.save_dataset_name is not None else self.dataset_name
         path = self.models_dir / f"{self.mode}__{self.name}__{dataset_to_use}.joblib"
         joblib.dump(self, path)
-        logger.info(f"[{self.name}] Model saved → {path}")
+        logger.debug(f"[{self.name}] Model saved → {path}")
 
     def _save_results(self, results: dict, split: str) -> None:
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -252,4 +252,4 @@ class Model:
         path = self.results_dir / f"{self.mode}__{self.name}__{dataset_to_use}__{split}__metrics.json"
         with open(path, "w") as f:
             json.dump({"mode": self.mode, "model": self.name, "dataset": dataset_to_use, "split": split, "metrics": results}, f, indent=2)
-        logger.info(f"[{self.name}] Results saved → {path}")
+        logger.debug(f"[{self.name}] Results saved → {path}")

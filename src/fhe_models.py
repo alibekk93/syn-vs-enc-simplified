@@ -92,7 +92,7 @@ class FHEModel:
         self.y_test: Optional[np.ndarray] = None
         self.save_dataset_name: Optional[str] = None
 
-        logger.info(f"[FHE:{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
+        logger.debug(f"[FHE:{self.name}] Initialized with hyperparameters: {hyperparams} (mode={self.mode})")
 
     # ------------------------------------------------------------------
     # Public API
@@ -106,7 +106,7 @@ class FHEModel:
 
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
         path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.info(f"[FHE:{self.name}] Loading data from {path}")
+        logger.debug(f"[FHE:{self.name}] Loading data from {path}")
         self.df = pd.read_csv(path)
 
         ds_cfg = load_config(dataset_cfg)
@@ -125,7 +125,7 @@ class FHEModel:
             else:
                 raise KeyError(f"Dataset '{dataset_name}' not found.")
 
-        logger.info(f"[FHE:{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
+        logger.debug(f"[FHE:{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
     def split(self) -> None:
         if self.df is None or self.target is None:

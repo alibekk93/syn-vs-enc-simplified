@@ -30,11 +30,11 @@ def check_torch():
     try:
         import torch
         cuda_available = torch.cuda.is_available()
-        logging.debug(f"[Torch] CUDA available: {cuda_available}")
+        logging.info(f"[Torch] CUDA available: {cuda_available}")
         if cuda_available:
-            logging.debug(f"[Torch] Using GPU: {torch.cuda.get_device_name(0)}")
+            logging.info(f"[Torch] Using GPU: {torch.cuda.get_device_name(0)}")
     except ImportError:
-        logging.debug("[Torch] PyTorch not installed — skipping CUDA check")
+        logging.info("[Torch] PyTorch not installed — skipping CUDA check")
 
 
 def set_seed(seed: int):
@@ -57,6 +57,8 @@ def set_seed(seed: int):
 # --------------------------------------------------
 
 def run_experiment(config_path: str):
+    check_torch()
+
     cfg          = load_config(config_path)
     datasets     = cfg.get("datasets")
     models       = cfg.get("models")
