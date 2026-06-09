@@ -14,6 +14,7 @@ from src.utils import load_config
 
 logger = logging.getLogger(__name__)
 logging.getLogger("sdv").setLevel(logging.WARNING)
+logging.getLogger("rdt").setLevel(logging.WARNING)
 
 SUPPORTED_SYNTHESIZERS = {
     "gaussian_copula": GaussianCopulaSynthesizer,
