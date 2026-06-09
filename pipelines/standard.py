@@ -9,8 +9,17 @@ from src.resource_profiling import ResourceProfiler
 logger = logging.getLogger(__name__)
 
 DATASETS_CFG = "config/datasets.yaml"
+
+
 MODELS_CFG   = "config/models.yaml"
 RESOURCE_CFG = "config/resource_profiling.yaml"
+
+
+def _log_section(title: str) -> None:
+    bar = "=" * 60
+    logger.info(bar)
+    logger.info(f"  {title}")
+    logger.info(bar)
 
 
 def run(datasets: list[str] | None = None, models: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml", models_config: str = "config/models.yaml") -> dict:
@@ -29,6 +38,8 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None, data
     targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
     logger.debug(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
+
+    _log_section("STANDARD")
 
     results = {}
     for dataset_name in targets_datasets:

@@ -9,9 +9,18 @@ from src.resource_profiling import ResourceProfiler
 logger = logging.getLogger(__name__)
 
 DATASETS_CFG  = "config/datasets.yaml"
+
+
 MODELS_CFG    = "config/models.yaml"
 FHE_CFG       = "config/fhe.yaml"
 RESOURCE_CFG  = "config/resource_profiling.yaml"
+
+
+def _log_section(title: str) -> None:
+    bar = "=" * 60
+    logger.info(bar)
+    logger.info(f"  {title}")
+    logger.info(bar)
 
 
 # ------------------------------------------------------------------
@@ -114,6 +123,8 @@ def run(
     # Sweep loop (replaces ablation pipeline)
     # --------------------------------------------------------------
     for n_bits in n_bits_values:
+        n_bits_label = f"  |  n_bits={n_bits}" if n_bits is not None else ""
+        _log_section(f"FHE  |  mode: {fhe_mode}{n_bits_label}")
 
         logger.debug(f"[FHE] Running n_bits={n_bits}")
 

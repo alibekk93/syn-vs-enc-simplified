@@ -10,9 +10,18 @@ from src.resource_profiling import ResourceProfiler
 logger = logging.getLogger(__name__)
 
 DATASETS_CFG     = "config/datasets.yaml"
+
+
 MODELS_CFG       = "config/models.yaml"
 SYNTHESIZERS_CFG = "config/synthesizers.yaml"
 RESOURCE_CFG     = "config/resource_profiling.yaml"
+
+
+def _log_section(title: str) -> None:
+    bar = "=" * 60
+    logger.info(bar)
+    logger.info(f"  {title}")
+    logger.info(bar)
 
 
 def run(
@@ -49,9 +58,11 @@ def run(
     )
 
     results = {}
-    for dataset_name in targets_datasets:
-        results[dataset_name] = {}
-        for synth_name in targets_synthesizers:
+    for synth_name in targets_synthesizers:
+        _log_section(f"SYNTHETIC: {synth_name}")
+
+        for dataset_name in targets_datasets:
+            results.setdefault(dataset_name, {})
             results[dataset_name][synth_name] = {}
 
             logger.info(f"--- Synthesizing: {synth_name} on {dataset_name} ---")
