@@ -483,13 +483,16 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
         hue=hue,
         order=order,
         palette=palette,
-        alpha=box_cfg["alpha"],
         linewidth=box_cfg["linewidth"],
         notch=box_cfg["notch"],
         showmeans=box_cfg["showmeans"],
         meanprops=meanprops,
         ax=ax,
     )
+
+    # `alpha` is not accepted by ax.bxp() in older seaborn — apply to patches manually
+    for patch in ax.patches:
+        patch.set_alpha(box_cfg["alpha"])
 
     strip_kwargs = dict(
         data=subset,
