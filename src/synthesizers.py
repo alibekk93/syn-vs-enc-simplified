@@ -13,8 +13,8 @@ from sklearn.model_selection import train_test_split
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
-logging.getLogger("sdv").setLevel(logging.WARNING)
-logging.getLogger("rdt").setLevel(logging.WARNING)
+for _lib in ("sdv", "rdt", "copulas"):
+    logging.getLogger(_lib).setLevel(logging.WARNING)
 
 SUPPORTED_SYNTHESIZERS = {
     "gaussian_copula": GaussianCopulaSynthesizer,
