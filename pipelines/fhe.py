@@ -102,7 +102,7 @@ def run(
     base_fhe_cfg = fhe_config_override or load_config(FHE_CFG)
     n_bits_values = _expand_n_bits(base_fhe_cfg)
 
-    logger.info(
+    logger.debug(
         f"FHE pipeline started — datasets: {targets_datasets}, "
         f"models: {targets_models}, fhe_mode: {fhe_mode}, "
         f"n_bits sweep: {n_bits_values}"
@@ -115,7 +115,7 @@ def run(
     # --------------------------------------------------------------
     for n_bits in n_bits_values:
 
-        logger.info(f"[FHE] Running n_bits={n_bits}")
+        logger.debug(f"[FHE] Running n_bits={n_bits}")
 
         fhe_config = _inject_n_bits(base_fhe_cfg, n_bits)
         run_results = {}
@@ -207,5 +207,5 @@ def run(
         # store results per n_bits
         all_results[n_bits] = run_results
 
-    logger.info("FHE pipeline complete.")
+    logger.debug("FHE pipeline complete.")
     return all_results

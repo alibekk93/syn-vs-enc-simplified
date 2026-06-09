@@ -30,11 +30,11 @@ def check_torch():
     try:
         import torch
         cuda_available = torch.cuda.is_available()
-        logging.info(f"[Torch] CUDA available: {cuda_available}")
+        logging.debug(f"[Torch] CUDA available: {cuda_available}")
         if cuda_available:
-            logging.info(f"[Torch] Using GPU: {torch.cuda.get_device_name(0)}")
+            logging.debug(f"[Torch] Using GPU: {torch.cuda.get_device_name(0)}")
     except ImportError:
-        logging.info("[Torch] PyTorch not installed — skipping CUDA check")
+        logging.debug("[Torch] PyTorch not installed — skipping CUDA check")
 
 
 def set_seed(seed: int):
@@ -57,8 +57,6 @@ def set_seed(seed: int):
 # --------------------------------------------------
 
 def run_experiment(config_path: str):
-    check_torch()
-
     cfg          = load_config(config_path)
     datasets     = cfg.get("datasets")
     models       = cfg.get("models")
@@ -66,29 +64,21 @@ def run_experiment(config_path: str):
     fhe_mode     = cfg.get("fhe_mode", "simulate")
     pipelines_cfg = cfg.get("pipelines", {})
 
-    logger.info(f"=== Starting full pipeline (config: {config_path}) ===")
-
     if pipelines_cfg.get("preprocessing"):
-        logger.info("=== Preprocessing ===")
         preprocessing.run(datasets=datasets)
 
     if pipelines_cfg.get("raw"):
-        logger.info("=== Raw ===")
         standard.run(datasets=datasets, models=models)
 
     if pipelines_cfg.get("synthetic"):
-        logger.info("=== Synthetic ===")
         synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
 
     if pipelines_cfg.get("fhe"):
-        logger.info("=== FHE ===")
         fhe.run(
             datasets=datasets,
             models=models,
             fhe_mode=fhe_mode
         )
-
-    logger.info("=== Experiment complete ===")
 
 
 def run_single_bootstrap(config_path: str, seed: int):

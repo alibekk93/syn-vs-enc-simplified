@@ -22,7 +22,7 @@ def run(datasets: list[str] | None = None, datasets_config: str = "config/datase
         Dict of {dataset: processing_results}
     """
     targets = datasets or list(load_config(datasets_config).keys())
-    logger.info(f"Preprocessing pipeline started — datasets: {targets}")
+    logger.debug(f"Preprocessing pipeline started — datasets: {targets}")
 
     results = {}
     for name in targets:
@@ -72,5 +72,5 @@ def run(datasets: list[str] | None = None, datasets_config: str = "config/datase
         finally:
             profiler.reset()
 
-    logger.info("Preprocessing pipeline complete.")
+    logger.debug("Preprocessing pipeline complete.")
     return results

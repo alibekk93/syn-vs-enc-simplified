@@ -28,7 +28,7 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None, data
     targets_datasets = datasets or list(load_config(datasets_config).keys())
     targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
-    logger.info(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
+    logger.debug(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
 
     results = {}
     for dataset_name in targets_datasets:
@@ -84,5 +84,5 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None, data
                 }
                 profiler.reset()
 
-    logger.info("Standard pipeline complete.")
+    logger.debug("Standard pipeline complete.")
     return results

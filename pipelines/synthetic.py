@@ -43,7 +43,7 @@ def run(
     targets_synthesizers = synthesizers or [k for k in load_config(synthesizers_config).get("methods", [])]
     targets_models       = models       or [m["name"] for m in load_config(models_config).get("models", [])]
 
-    logger.info(
+    logger.debug(
         f"Synthetic pipeline started — datasets: {targets_datasets}, "
         f"synthesizers: {targets_synthesizers}, models: {targets_models}"
     )
@@ -147,5 +147,5 @@ def run(
             finally:
                 synth_profiler.reset()
 
-    logger.info("Synthetic pipeline complete.")
+    logger.debug("Synthetic pipeline complete.")
     return results
