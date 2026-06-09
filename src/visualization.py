@@ -349,6 +349,129 @@ def plot_fhe_ablation(df, metric, save_dir=FIGURES_DIR):
 
 
 # ===========================================================
+# BOOTSTRAP DATA LOADING
+# ===========================================================
+
+def load_bootstrap(path="results/bootstrap/aggregated.json"):
+    """Flatten aggregated bootstrap JSON into a merged DataFrame (test split only for metrics)."""
+    with open(path) as f:
+        data = json.load(f)
+
+    key_cols = ["mode", "n_bits", "model", "dataset", "seed"]
+
+    metric_records = []
+    for raw_mode, models in data.get("metrics", {}).items():
+        meta = parse_filename_metadata(raw_mode)
+        for model_name, datasets_map in models.items():
+            for dataset_name, entries in datasets_map.items():
+                for entry in entries:
+                    if entry.get("split") != "test":
+                        continue
+                    metric_records.append({
+                        "mode": meta["mode"],
+                        "n_bits": meta["n_bits"],
+                        "model": model_name,
+                        "dataset": dataset_name,
+                        "seed": entry["seed"],
+                        **entry.get("metrics", {})
+                    })
+
+    resource_records = []
+    for raw_mode, models in data.get("resource_profiles", {}).items():
+        meta = parse_filename_metadata(raw_mode)
+        for model_name, datasets_map in models.items():
+            for dataset_name, entries in datasets_map.items():
+                for entry in entries:
+                    resource_records.append({
+                        "mode": meta["mode"],
+                        "n_bits": meta["n_bits"],
+                        "model": model_name,
+                        "dataset": dataset_name,
+                        "seed": entry["seed"],
+                        "train_time": sum(entry.get("training_time", {}).values()),
+                        "inf_time_total": entry.get("inference_time", {}).get("total"),
+                        "inf_time_per_sample": entry.get("inference_time", {}).get("per_sample"),
+                        "mem_train_avg": entry.get("memory", {}).get("training", {}).get("average_mb"),
+                        "mem_train_peak": entry.get("memory", {}).get("training", {}).get("peak_mb"),
+                        "mem_inf_avg": entry.get("memory", {}).get("inference", {}).get("average_mb"),
+                        "mem_inf_peak": entry.get("memory", {}).get("inference", {}).get("peak_mb"),
+                        "model_size_mb": entry.get("storage", {}).get("model_size_mb"),
+                        "data_size_mb": entry.get("storage", {}).get("data_size_mb"),
+                        "circuit_complexity": entry.get("fhe", {}).get("circuit_complexity"),
+                    })
+
+    metrics_df = pd.DataFrame(metric_records)
+    profiles_df = pd.DataFrame(resource_records)
+
+    if metrics_df.empty:
+        return profiles_df
+    if profiles_df.empty:
+        return metrics_df
+
+    return pd.merge(metrics_df, profiles_df, on=key_cols, how="outer")
+
+
+def _mode_label(mode, n_bits):
+    if mode == "fhe" and pd.notna(n_bits):
+        return f"FHE ({int(n_bits)}-bit)"
+    return {"standard": "Real", "gaussian_copula": "Synthetic"}.get(mode, mode)
+
+
+def _mode_label_sort_key(label):
+    if label == "Real":
+        return (0, 0)
+    if label == "Synthetic":
+        return (1, 0)
+    m = re.search(r"(\d+)", label)
+    return (2, int(m.group(1)) if m else 0)
+
+
+# ===========================================================
+# BOXPLOTS (BOOTSTRAP)
+# ===========================================================
+
+def plot_boxplot(dataset, metric, hue=None, save_dir=FIGURES_DIR,
+                 bootstrap_path="results/bootstrap/aggregated.json"):
+    """
+    Boxplot of bootstrap distributions for a given dataset/metric.
+
+    x-axis: all modes (Real, Synthetic, FHE (N-bit) ordered by n_bits)
+    y-axis: metric value (performance or resource)
+    hue: optional column to split boxes within each mode (e.g. "model")
+    """
+    df = load_bootstrap(bootstrap_path)
+    df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
+
+    subset = df[df["dataset"] == dataset].dropna(subset=[metric])
+    if subset.empty:
+        return
+
+    order = sorted(subset["mode_label"].unique(), key=_mode_label_sort_key)
+
+    plt.figure(figsize=(max(6, len(order) * 1.2), 5))
+
+    sns.boxplot(
+        data=subset,
+        x="mode_label",
+        y=metric,
+        hue=hue,
+        order=order,
+    )
+
+    plt.title(f"{format_metric_name(metric)} — {dataset}")
+    plt.xlabel("Mode")
+    plt.ylabel(format_metric_name(metric))
+    plt.xticks(rotation=20)
+    plt.tight_layout()
+
+    filename = f"boxplot_{metric}__{dataset}.svg"
+    save_path = Path(save_dir) / filename
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format="svg")
+    plt.close()
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
@@ -388,6 +511,17 @@ def generate_all_figures():
     for metric in metrics:
         if metric in full_df.columns:
             plot_fhe_ablation(full_df, metric)
+
+    # -------------------------------------------------------
+    # BOXPLOTS (BOOTSTRAP)
+    # -------------------------------------------------------
+    bootstrap_df = load_bootstrap()
+    all_metrics = metrics + list(RESOURCE_MAP.keys())
+    for dataset in bootstrap_df["dataset"].unique():
+        for metric in all_metrics:
+            col = RESOURCE_MAP[metric][0] if metric in RESOURCE_MAP else metric
+            if col in bootstrap_df.columns:
+                plot_boxplot(dataset, col)
 
     # -------------------------------------------------------
     # SAVE MERGED TABLE
