@@ -1,7 +1,9 @@
 # syn-vs-enc-simplified
 
 ## TD
-- visualizations: color consistency; multi-panel figures; radar plots; dynamic pareto?
+- detected metadata verbosity
+- check imputation for gestational_diabetes and pregnancy_outcome
+- visualizations: config, color consistency; multi-panel figures; radar plots; dynamic pareto?
 
 ## Abstract draft
 The increasing use of machine learning in healthcare has amplified concerns around the protection of sensitive patient information, particularly protected health information (PHI). Privacy-preserving approaches such as synthetic data generation and secure computation have emerged as promising solutions, yet their relative trade-offs in predictive performance and computational efficiency remain insufficiently characterized. In this work, we present a unified experimental framework for systematically comparing these approaches on tabular healthcare datasets.
