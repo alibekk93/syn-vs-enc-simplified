@@ -2,6 +2,7 @@
 
 import json
 import re
+from functools import lru_cache
 from pathlib import Path
 import pandas as pd
 import seaborn as sns
@@ -135,6 +136,12 @@ def merge_metrics_profiles(metrics_df, profiles_df):
 # ===========================================================
 
 from src.utils import load_config
+
+
+@lru_cache(maxsize=None)
+def _load_viz_config(path="config/visualization.yaml"):
+    return load_config(path)
+
 
 def get_metrics_from_config(cfg_path="config/models.yaml"):
     cfg = load_config(cfg_path)
@@ -430,25 +437,44 @@ def _mode_label_sort_key(label):
 # BOXPLOTS (BOOTSTRAP)
 # ===========================================================
 
-def plot_boxplot(dataset, metric, hue=None, save_dir=FIGURES_DIR,
-                 bootstrap_path="results/bootstrap/aggregated.json"):
+def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
+                 bootstrap_path="results/bootstrap/aggregated.json",
+                 viz_cfg_path="config/visualization.yaml"):
     """
     Boxplot of bootstrap distributions for a given dataset/metric.
 
     x-axis: all modes (Real, Synthetic, FHE (N-bit) ordered by n_bits)
     y-axis: metric value (performance or resource)
     hue: optional column to split boxes within each mode (e.g. "model")
+    palette: seaborn palette name or dict; defaults to config value
     """
+    cfg = _load_viz_config(viz_cfg_path)
+    box_cfg = cfg["boxplot"]
+    font_cfg = cfg["fonts"]
+    fig_cfg = cfg["figures"]
+
+    if palette is None:
+        palette = cfg["colors"]["palette"]
+    if save_dir is None:
+        save_dir = Path(fig_cfg["dir"])
+
     df = load_bootstrap(bootstrap_path)
     df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
 
     subset = df[df["dataset"] == dataset].dropna(subset=[metric])
     if subset.empty:
-        return
+        return None, None
 
     order = sorted(subset["mode_label"].unique(), key=_mode_label_sort_key)
 
-    plt.figure(figsize=(max(6, len(order) * 1.2), 5))
+    fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.2), 5))
+
+    meanprops = {
+        "marker": "D",
+        "markerfacecolor": box_cfg["mean_marker_color"],
+        "markeredgecolor": box_cfg["mean_marker_color"],
+        "markersize": box_cfg["mean_marker_size"],
+    }
 
     sns.boxplot(
         data=subset,
@@ -456,19 +482,59 @@ def plot_boxplot(dataset, metric, hue=None, save_dir=FIGURES_DIR,
         y=metric,
         hue=hue,
         order=order,
+        palette=palette,
+        alpha=box_cfg["alpha"],
+        linewidth=box_cfg["linewidth"],
+        notch=box_cfg["notch"],
+        showmeans=box_cfg["showmeans"],
+        meanprops=meanprops,
+        ax=ax,
     )
 
-    plt.title(f"{format_metric_name(metric)} — {dataset}")
-    plt.xlabel("Mode")
-    plt.ylabel(format_metric_name(metric))
+    strip_kwargs = dict(
+        data=subset,
+        x="mode_label",
+        y=metric,
+        hue=hue,
+        order=order,
+        dodge=hue is not None,
+        alpha=box_cfg["strip_alpha"],
+        size=box_cfg["strip_size"],
+        ax=ax,
+        legend=False,
+    )
+    if hue is None:
+        strip_kwargs["color"] = cfg["colors"]["strip_color"]
+    else:
+        strip_kwargs["palette"] = palette
+
+    sns.stripplot(**strip_kwargs)
+
+    ax.grid(axis="y", alpha=box_cfg["grid_alpha"])
+
+    ax.set_title(
+        f"{format_metric_name(metric)} — {dataset}",
+        fontsize=font_cfg["title_size"],
+        fontweight=font_cfg["title_weight"],
+    )
+    ax.set_xlabel("Mode", fontsize=font_cfg["label_size"])
+    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
+    ax.tick_params(labelsize=font_cfg["tick_size"])
     plt.xticks(rotation=20)
+
+    legend = ax.get_legend()
+    if hue and legend:
+        legend.set_title(hue.replace("_", " ").title())
+
     plt.tight_layout()
 
-    filename = f"boxplot_{metric}__{dataset}.svg"
-    save_path = Path(save_dir) / filename
+    fmt = fig_cfg["format"]
+    save_path = Path(save_dir) / f"boxplot_{metric}__{dataset}.{fmt}"
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format="svg")
+    plt.savefig(save_path, format=fmt)
     plt.close()
+
+    return fig, ax
 
 
 # ===========================================================

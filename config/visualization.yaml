@@ -1,0 +1,28 @@
+# =============================================================================
+# visualization.yaml — Visualization Configuration
+# =============================================================================
+
+figures:
+  dir: results/figures
+  format: svg
+
+fonts:
+  title_size: 14
+  title_weight: bold
+  label_size: 12
+  tick_size: 10
+
+colors:
+  palette: "tab10"
+  strip_color: "0.35"         # neutral gray for jittered points when no hue
+
+boxplot:
+  alpha: 0.7
+  linewidth: 1.2
+  notch: true
+  showmeans: true
+  mean_marker_color: "#2ca02c"
+  mean_marker_size: 8
+  strip_alpha: 0.4
+  strip_size: 3
+  grid_alpha: 0.3
