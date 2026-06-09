@@ -41,8 +41,8 @@ def run(datasets: list[str] | None = None, datasets_config: str = "config/datase
 
             profiler.stop_memory_sampling()
 
-            raw_path       = f"data/raw/{name}.csv"
-            processed_path = f"data/processed/{name}.csv"
+            raw_path       = str(dataset.raw_path)
+            processed_path = str(dataset.processed_path)
             profiler.log_storage(model_path=None, data_path=processed_path)
 
             raw_size = profiler.file_size_mb(raw_path)

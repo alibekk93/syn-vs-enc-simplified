@@ -41,16 +41,18 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     base_resource = load_config(RESOURCE_CFG)
     base_synth    = load_config(SYNTH_CFG)
 
-    # Modify datasets config: add raw_path for each dataset pointing to bootstrap sample
-    bootstrap_raw_dir = Path(f"data/bootstrap/{seed}")
+    # Modify datasets config: add raw_path and processed_path for each dataset
+    bootstrap_raw_dir       = Path(f"data/bootstrap/{seed}")
+    bootstrap_processed_dir = Path(f"data/processed/bootstrap/{seed}")
     bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
+    bootstrap_processed_dir.mkdir(parents=True, exist_ok=True)
 
     for ds_name in datasets:
         if ds_name in base_datasets:
-            # Ensure raw_path is set to the bootstrap sample location
-            base_datasets[ds_name]["raw_path"] = str(bootstrap_raw_dir / f"{ds_name}.csv")
+            base_datasets[ds_name]["raw_path"]       = str(bootstrap_raw_dir       / f"{ds_name}.csv")
+            base_datasets[ds_name]["processed_path"] = str(bootstrap_processed_dir / f"{ds_name}.csv")
         else:
-            logger.warning(f"Dataset '{ds_name}' not found in base config; skipping raw_path override.")
+            logger.warning(f"Dataset '{ds_name}' not found in base config; skipping path overrides.")
 
     # Write modified datasets config
     dataset_config_path = tmp_dir / "datasets.yaml"
@@ -79,7 +81,7 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     # Modify synthesizers config: set output directories under bootstrap seed
     if "output" not in base_synth:
         base_synth["output"] = {}
-    base_synth["output"]["synthetic_dir"]    = f"data/synthetic/bootstrap/{seed}"
+    base_synth["output"]["synthetic_dir"]    = f"data/processed/bootstrap/{seed}"
     base_synth["output"]["synthesizers_dir"] = f"synthesizers/bootstrap/{seed}"
 
     synth_config_path = tmp_dir / "synthesizers.yaml"

@@ -87,8 +87,12 @@ class Synthesizer:
 
         Similar to Model.load_data but does not extract a target column.
         Additionally, splits the dataset into train/test.
+        processed_path from the config entry overrides the default data/processed/ location.
         """
-        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
+        ds_cfg = load_config(dataset_cfg)
+        entry = ds_cfg.get(dataset_name, {})
+        processed_path = entry.get("processed_path")
+        path = Path(processed_path) if processed_path else self.PROCESSED_DIR / f"{dataset_name}.csv"
         logger.debug(f"[{self.name}] Loading data from {path}")
         df = pd.read_csv(path)
 

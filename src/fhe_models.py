@@ -105,26 +105,34 @@ class FHEModel:
         return self.evaluate()
 
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
-        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.debug(f"[FHE:{self.name}] Loading data from {path}")
-        self.df = pd.read_csv(path)
-
         ds_cfg = load_config(dataset_cfg)
+
         if dataset_name in ds_cfg:
-            self.target = ds_cfg[dataset_name]["target"]
+            entry = ds_cfg[dataset_name]
+            processed_path = entry.get("processed_path")
+            path = Path(processed_path) if processed_path else self.PROCESSED_DIR / f"{dataset_name}.csv"
+            self.target = entry["target"]
             self.dataset_name = dataset_name
         else:
             parts = dataset_name.split('__')
             if len(parts) == 2:
                 base_dataset_name = parts[1]
                 if base_dataset_name in ds_cfg:
-                    self.target = ds_cfg[base_dataset_name]["target"]
+                    entry = ds_cfg[base_dataset_name]
+                    processed_path = entry.get("processed_path")
+                    if processed_path:
+                        path = Path(processed_path).parent / f"{dataset_name}.csv"
+                    else:
+                        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
+                    self.target = entry["target"]
                     self.dataset_name = dataset_name
                 else:
                     raise KeyError(f"Dataset '{dataset_name}' not found.")
             else:
                 raise KeyError(f"Dataset '{dataset_name}' not found.")
 
+        logger.debug(f"[FHE:{self.name}] Loading data from {path}")
+        self.df = pd.read_csv(path)
         logger.debug(f"[FHE:{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
     def split(self) -> None:

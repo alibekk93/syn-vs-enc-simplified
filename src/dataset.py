@@ -60,6 +60,11 @@ class Dataset:
         self.features: list = self.cfg.get("features") or []
         self.target:   str  = self.cfg.get("target")
 
+        raw_cfg            = self.cfg.get("raw_path")
+        self.raw_path      = Path(raw_cfg) if raw_cfg else self.RAW_DIR / f"{self.name}.csv"
+        processed_cfg      = self.cfg.get("processed_path")
+        self.processed_path = Path(processed_cfg) if processed_cfg else self.PROCESSED_DIR / f"{self.name}.csv"
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -73,12 +78,7 @@ class Dataset:
 
     def load(self) -> pd.DataFrame:
         """Load raw CSV and assign column names from config."""
-        # Determine raw data path: either explicit raw_path in config or default location.
-        raw_path_cfg = self.cfg.get("raw_path")
-        if raw_path_cfg:
-            path = Path(raw_path_cfg)
-        else:
-            path = self.RAW_DIR / f"{self.name}.csv"
+        path = self.raw_path
         logger.info(f"[{self.name}] Loading from {path}")
         df = pd.read_csv(path)
 
@@ -127,11 +127,10 @@ class Dataset:
         return df
 
     def save(self, df: pd.DataFrame) -> None:
-        """Save processed DataFrame to data/processed/{name}.csv."""
-        self.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-        path = self.PROCESSED_DIR / f"{self.name}.csv"
-        df.to_csv(path, index=False)
-        logger.info(f"[{self.name}] Saved → {path}")
+        """Save processed DataFrame to the resolved processed_path."""
+        self.processed_path.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(self.processed_path, index=False)
+        logger.info(f"[{self.name}] Saved → {self.processed_path}")
 
     # ------------------------------------------------------------------
     # Internal

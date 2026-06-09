@@ -136,28 +136,37 @@ class Model:
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
         """Load processed dataset and resolve target column from datasets.yaml.
         For synthetic datasets (named '<synth>__<original>'), uses the original dataset's config.
+        processed_path from the config entry overrides the default data/processed/ location.
         """
-        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
-        logger.debug(f"[{self.name}] Loading data from {path}")
-        self.df = pd.read_csv(path)
-
         ds_cfg = load_config(dataset_cfg)
+
         if dataset_name in ds_cfg:
-            self.target       = ds_cfg[dataset_name]["target"]
+            entry = ds_cfg[dataset_name]
+            processed_path = entry.get("processed_path")
+            path = Path(processed_path) if processed_path else self.PROCESSED_DIR / f"{dataset_name}.csv"
+            self.target       = entry["target"]
             self.dataset_name = dataset_name
         else:
-            # Try to interpret as a synthetic dataset: <synthesizer>/<fhe>__<original_dataset>
+            # Try to interpret as a synthetic dataset: <synthesizer>__<original_dataset>
             parts = dataset_name.split('__')
             if len(parts) == 2:
                 base_dataset_name = parts[1]
                 if base_dataset_name in ds_cfg:
-                    self.target       = ds_cfg[base_dataset_name]["target"]
+                    entry = ds_cfg[base_dataset_name]
+                    processed_path = entry.get("processed_path")
+                    if processed_path:
+                        path = Path(processed_path).parent / f"{dataset_name}.csv"
+                    else:
+                        path = self.PROCESSED_DIR / f"{dataset_name}.csv"
+                    self.target       = entry["target"]
                     self.dataset_name = dataset_name
                 else:
                     raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg} and base dataset '{base_dataset_name}' not found either.")
             else:
                 raise KeyError(f"Dataset '{dataset_name}' not found in {dataset_cfg}")
 
+        logger.debug(f"[{self.name}] Loading data from {path}")
+        self.df = pd.read_csv(path)
         logger.debug(f"[{self.name}] Loaded {len(self.df)} rows, target='{self.target}'")
 
     def split(self) -> None:
