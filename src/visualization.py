@@ -453,6 +453,10 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
     font_cfg = cfg["fonts"]
     fig_cfg = cfg["figures"]
 
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
     if palette is None:
         palette = cfg["colors"]["palette"]
     if save_dir is None:
@@ -469,12 +473,13 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
 
     fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.2), 5))
 
+    show_means = box_cfg["showmeans"]
     meanprops = {
         "marker": "D",
         "markerfacecolor": box_cfg["mean_marker_color"],
         "markeredgecolor": box_cfg["mean_marker_color"],
         "markersize": box_cfg["mean_marker_size"],
-    }
+    } if show_means else {}
 
     sns.boxplot(
         data=subset,
@@ -485,12 +490,11 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
         palette=palette,
         linewidth=box_cfg["linewidth"],
         notch=box_cfg["notch"],
-        showmeans=box_cfg["showmeans"],
+        showmeans=show_means,
         meanprops=meanprops,
         ax=ax,
     )
 
-    # `alpha` is not accepted by ax.bxp() in older seaborn — apply to patches manually
     for patch in ax.patches:
         patch.set_alpha(box_cfg["alpha"])
 
@@ -513,7 +517,12 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
 
     sns.stripplot(**strip_kwargs)
 
-    ax.grid(axis="y", alpha=box_cfg["grid_alpha"])
+    if box_cfg.get("despine", True):
+        sns.despine(ax=ax)
+
+    grid_alpha = box_cfg.get("grid_alpha", 0.0)
+    if grid_alpha > 0:
+        ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
 
     ax.set_title(
         f"{format_metric_name(metric)} — {dataset}",
@@ -523,11 +532,10 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
     ax.set_xlabel("Mode", fontsize=font_cfg["label_size"])
     ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
     ax.tick_params(labelsize=font_cfg["tick_size"])
-    plt.xticks(rotation=20)
+    plt.xticks(rotation=15)
 
-    legend = ax.get_legend()
-    if hue and legend:
-        legend.set_title(hue.replace("_", " ").title())
+    if hue and ax.get_legend():
+        ax.get_legend().set_title(hue.replace("_", " ").title())
 
     plt.tight_layout()
 
