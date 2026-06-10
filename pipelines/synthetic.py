@@ -107,7 +107,8 @@ def run(
                         with train_profiler.time_block("data_loading"):
                             model.load_data(synthetic_dataset, dataset_cfg=datasets_config)
                             model.save_dataset_name = dataset_name
-                            model.split()
+                            model.use_all_as_train()
+                            model.load_test_data(dataset_name, dataset_cfg=datasets_config)
 
                         with train_profiler.time_block("training"):
                             model.train()

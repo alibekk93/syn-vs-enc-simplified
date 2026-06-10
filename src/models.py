@@ -188,6 +188,28 @@ class Model:
 
         logger.debug(f"[{self.name}] Split → train={len(self.X_train)}, test={len(self.X_test)}")
 
+    def use_all_as_train(self) -> None:
+        """Use the entire loaded dataset as the training set (no test split)."""
+        if self.df is None or self.target is None:
+            raise RuntimeError("Call load_data() before use_all_as_train()")
+        X = self.df.drop(columns=[self.target])
+        y = self.df[self.target]
+        self.X_train = X.reset_index(drop=True)
+        self.y_train = y.reset_index(drop=True)
+        logger.debug(f"[{self.name}] Using all {len(self.X_train)} rows as training set")
+
+    def load_test_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
+        """Load a real processed dataset and set it as the test split."""
+        ds_cfg = load_config(dataset_cfg)
+        entry = ds_cfg[dataset_name]
+        processed_path = entry.get("processed_path")
+        path = Path(processed_path) if processed_path else self.PROCESSED_DIR / f"{dataset_name}.csv"
+        df = pd.read_csv(path)
+        target = entry["target"]
+        self.X_test = df.drop(columns=[target]).reset_index(drop=True)
+        self.y_test = df[target].reset_index(drop=True)
+        logger.debug(f"[{self.name}] Loaded real test data: {len(self.X_test)} rows from {path}")
+
     def train(self) -> None:
         """Fit the model on the training set."""
         if self.X_train is None:
