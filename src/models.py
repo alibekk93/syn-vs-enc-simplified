@@ -199,16 +199,29 @@ class Model:
         logger.debug(f"[{self.name}] Using all {len(self.X_train)} rows as training set")
 
     def load_test_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
-        """Load a real processed dataset and set it as the test split."""
+        """Load real processed dataset and set its test split, using the same split params as split()."""
         ds_cfg = load_config(dataset_cfg)
         entry = ds_cfg[dataset_name]
         processed_path = entry.get("processed_path")
         path = Path(processed_path) if processed_path else self.PROCESSED_DIR / f"{dataset_name}.csv"
         df = pd.read_csv(path)
         target = entry["target"]
-        self.X_test = df.drop(columns=[target]).reset_index(drop=True)
-        self.y_test = df[target].reset_index(drop=True)
-        logger.debug(f"[{self.name}] Loaded real test data: {len(self.X_test)} rows from {path}")
+
+        test_size = self.cfg.get("test_size", 0.2)
+        seed      = self.cfg.get("random_seed", 42)
+        stratify  = self.cfg.get("stratify", False)
+
+        X = df.drop(columns=[target])
+        y = df[target]
+
+        _, X_test, _, y_test = train_test_split(
+            X, y, test_size=test_size, random_state=seed,
+            stratify=y if stratify else None
+        )
+
+        self.X_test = X_test.reset_index(drop=True)
+        self.y_test = y_test.reset_index(drop=True)
+        logger.debug(f"[{self.name}] Loaded real test split: {len(self.X_test)} rows from {path}")
 
     def train(self) -> None:
         """Fit the model on the training set."""
