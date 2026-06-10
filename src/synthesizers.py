@@ -6,7 +6,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Optional, Union
 
-from sdv.single_table import GaussianCopulaSynthesizer
+from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
 from sdv.metadata import Metadata
 from sklearn.model_selection import train_test_split
 
@@ -18,6 +18,7 @@ for _lib in ("sdv", "rdt", "copulas"):
 
 SUPPORTED_SYNTHESIZERS = {
     "gaussian_copula": GaussianCopulaSynthesizer,
+    "ctgan": CTGANSynthesizer,
 }
 
 

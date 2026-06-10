@@ -12,6 +12,7 @@
 #
 #   Supported methods:
 #     - gaussian_copula
+#     - ctgan
 #
 #   Supported distributions (for gaussian_copula numerical_distributions):
 #     norm, beta, truncnorm, uniform, gamma, gaussian_kde
@@ -42,3 +43,12 @@ methods:
       enforce_rounding: true
       default_distribution: norm
       numerical_distributions: {}
+
+  ctgan:
+    num_rows: same
+    parameters:
+      enforce_min_max_values: true
+      enforce_rounding: true
+      epochs: 300
+      verbose: false
+      enable_gpu: false
