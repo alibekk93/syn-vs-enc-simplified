@@ -51,4 +51,4 @@ methods:
       enforce_rounding: true
       epochs: 300
       verbose: false
-      enable_gpu: false
+      enable_gpu: true
