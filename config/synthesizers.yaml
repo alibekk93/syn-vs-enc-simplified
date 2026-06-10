@@ -30,6 +30,7 @@
 split:
   test_size: 0.2
   random_state: 42
+  stratify: true
 
 output:
   synthetic_dir: data/processed

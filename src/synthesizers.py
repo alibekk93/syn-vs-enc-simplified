@@ -65,6 +65,7 @@ class Synthesizer:
         self.method            = name
         self.test_size         = self.split_cfg.get("test_size", None)
         self.random_state      = self.split_cfg.get("random_state", 42)
+        self.stratify          = self.split_cfg.get("stratify", False)
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
@@ -106,12 +107,15 @@ class Synthesizer:
         if self.test_size:
             test_size = self.test_size
             random_state = self.random_state
+            target = entry.get("target")
+            stratify_col = df[target] if (self.stratify and target) else None
 
             df_train, df_test = train_test_split(
                 df,
                 test_size=test_size,
                 random_state=random_state,
-                shuffle=True
+                shuffle=True,
+                stratify=stratify_col,
             )
 
             # Store splits
