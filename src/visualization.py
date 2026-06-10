@@ -437,16 +437,15 @@ def _mode_label_sort_key(label):
 # BOXPLOTS (BOOTSTRAP)
 # ===========================================================
 
-def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
+def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
                  bootstrap_path="results/bootstrap/aggregated.json",
                  viz_cfg_path="config/visualization.yaml"):
     """
-    Boxplot of bootstrap distributions for a given dataset/metric.
+    Boxplot of bootstrap distributions for one dataset / model / metric combination.
 
-    x-axis: all modes (Real, Synthetic, FHE (N-bit) ordered by n_bits)
-    y-axis: metric value (performance or resource)
-    hue: optional column to split boxes within each mode (e.g. "model")
-    palette: seaborn palette name or dict; defaults to config value
+    x-axis  : modes (Real, Synthetic, FHE N-bit) — one box per mode, colored by mode
+    y-axis  : metric value
+    seeds   : aggregated into the box distribution
     """
     cfg = _load_viz_config(viz_cfg_path)
     box_cfg = cfg["boxplot"]
@@ -465,7 +464,10 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
     df = load_bootstrap(bootstrap_path)
     df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
 
-    subset = df[df["dataset"] == dataset].dropna(subset=[metric])
+    subset = (
+        df[(df["dataset"] == dataset) & (df["model"] == model)]
+        .dropna(subset=[metric])
+    )
     if subset.empty:
         return None, None
 
@@ -485,37 +487,35 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
         data=subset,
         x="mode_label",
         y=metric,
-        hue=hue,
+        hue="mode_label",
+        hue_order=order,
         order=order,
         palette=palette,
         linewidth=box_cfg["linewidth"],
         notch=box_cfg["notch"],
         showmeans=show_means,
         meanprops=meanprops,
+        legend=False,
         ax=ax,
     )
 
     for patch in ax.patches:
         patch.set_alpha(box_cfg["alpha"])
 
-    strip_kwargs = dict(
+    sns.stripplot(
         data=subset,
         x="mode_label",
         y=metric,
-        hue=hue,
+        hue="mode_label",
+        hue_order=order,
         order=order,
-        dodge=hue is not None,
+        palette=palette,
+        dodge=False,
         alpha=box_cfg["strip_alpha"],
         size=box_cfg["strip_size"],
-        ax=ax,
         legend=False,
+        ax=ax,
     )
-    if hue is None:
-        strip_kwargs["color"] = cfg["colors"]["strip_color"]
-    else:
-        strip_kwargs["palette"] = palette
-
-    sns.stripplot(**strip_kwargs)
 
     if box_cfg.get("despine", True):
         sns.despine(ax=ax)
@@ -524,8 +524,9 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
     if grid_alpha > 0:
         ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
 
+    model_pretty = model.replace("_", " ").title()
     ax.set_title(
-        f"{format_metric_name(metric)} — {dataset}",
+        f"{format_metric_name(metric)} — {dataset} / {model_pretty}",
         fontsize=font_cfg["title_size"],
         fontweight=font_cfg["title_weight"],
     )
@@ -534,13 +535,10 @@ def plot_boxplot(dataset, metric, hue=None, palette=None, save_dir=None,
     ax.tick_params(labelsize=font_cfg["tick_size"])
     plt.xticks(rotation=15)
 
-    if hue and ax.get_legend():
-        ax.get_legend().set_title(hue.replace("_", " ").title())
-
     plt.tight_layout()
 
     fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"boxplot_{metric}__{dataset}.{fmt}"
+    save_path = Path(save_dir) / f"boxplot_{metric}__{dataset}__{model}.{fmt}"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(save_path, format=fmt)
     plt.close()
@@ -595,10 +593,11 @@ def generate_all_figures():
     bootstrap_df = load_bootstrap()
     all_metrics = metrics + list(RESOURCE_MAP.keys())
     for dataset in bootstrap_df["dataset"].unique():
-        for metric in all_metrics:
-            col = RESOURCE_MAP[metric][0] if metric in RESOURCE_MAP else metric
-            if col in bootstrap_df.columns:
-                plot_boxplot(dataset, col)
+        for model in bootstrap_df["model"].unique():
+            for metric in all_metrics:
+                col = RESOURCE_MAP[metric][0] if metric in RESOURCE_MAP else metric
+                if col in bootstrap_df.columns:
+                    plot_boxplot(dataset, model, col)
 
     # -------------------------------------------------------
     # SAVE MERGED TABLE
