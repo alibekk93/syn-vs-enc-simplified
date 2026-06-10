@@ -14,6 +14,7 @@
 - diffusion
 
 ### methodology
+- bug: inference time FHE n_bits 2
 - bootstrap pre inference: identify a name and research past examples, draft justification
 - resource metrics
 - MIMIC dataset?
