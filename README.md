@@ -1,7 +1,26 @@
 # syn-vs-enc-simplified
 
 ## TD
-- visualizations: log scale, config, color consistency; multi-panel figures; radar plots; dynamic pareto?
+### visualizations
+- log scale
+- color consistency
+- multi-panel figures
+- radar plots
+- dynamic pareto?
+
+### synthesizers
+- sequential trace
+- adversarial random forest
+- diffusion
+
+### methodology
+- bootstrap pre inference: identify a name and research past examples, draft justification
+- resource metrics
+- MIMIC dataset?
+- multi-class classification?
+- hyperparameter tuning?
+- bootstrap sed fix end (31)
+- mlp
 
 ## Abstract draft
 The increasing use of machine learning in healthcare has amplified concerns around the protection of sensitive patient information, particularly protected health information (PHI). Privacy-preserving approaches such as synthetic data generation and secure computation have emerged as promising solutions, yet their relative trade-offs in predictive performance and computational efficiency remain insufficiently characterized. In this work, we present a unified experimental framework for systematically comparing these approaches on tabular healthcare datasets.
