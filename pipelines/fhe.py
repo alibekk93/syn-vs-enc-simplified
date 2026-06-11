@@ -180,11 +180,11 @@ def run(
                     profiler.log_inference(end - start, len(model.X_test))
                     profiler.stop_memory_sampling()
 
-                    profiler.log_fhe(
-                        complexity=getattr(model.model, "circuit_complexity", None)
-                    )
+                    fhe_circuit = getattr(model.model, "fhe_circuit", None)
+                    complexity  = getattr(fhe_circuit, "complexity", None)
+                    profiler.log_fhe(complexity=complexity)
 
-                    model_path = f"models/fhe__{model_name}__{dataset_name}.json"
+                    model_path = f"models/fhe_{n_bits}__{model_name}__{dataset_name}.json"
                     data_path  = f"data/processed/{dataset_name}.csv"
 
                     profiler.log_storage(model_path=model_path, data_path=data_path)
@@ -196,6 +196,11 @@ def run(
                     }
 
                     run_results[dataset_name][model_name] = result_obj
+
+                    logger.info(
+                        f"[FHE profiling] n_bits={n_bits} | {dataset_name} | {model_name} "
+                        f"| inference={round(end - start, 4)}s | circuit_complexity={complexity}"
+                    )
 
                     # Save profiling with n_bits included
                     profiler.save(

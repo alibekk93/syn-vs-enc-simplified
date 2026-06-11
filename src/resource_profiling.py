@@ -1,3 +1,4 @@
+import copy
 import json
 import time
 import tracemalloc
@@ -18,6 +19,9 @@ class ResourceProfiler:
         self.track_storage = self.enabled and self.cfg.get("storage", {}).get("enabled", True)
         self.track_fhe     = self.enabled and self.cfg.get("fhe",     {}).get("enabled", True)
 
+        mem_cfg = self.cfg.get("memory", {})
+        self.memory_interval = mem_cfg.get("interval", 0.1)
+
         log_cfg = self.cfg.get("logging", {})
         self.save_to_disk = log_cfg.get("save", False)
         self.output_dir   = Path(log_cfg.get("output_dir", "results/resource_profiles"))
@@ -25,6 +29,11 @@ class ResourceProfiler:
         self.reset()
 
     def reset(self):
+        thread = getattr(self, "_memory_sample_thread", None)
+        if thread and thread.is_alive():
+            self._memory_sampling = False
+            thread.join(timeout=1)
+
         self.results = {
             "training_time":  {},
             "inference_time": {},
@@ -65,7 +74,7 @@ class ResourceProfiler:
     # MEMORY PROFILING
     # ------------------------------------------------------------------
 
-    def start_memory_sampling(self, interval=0.1, phase="training"):
+    def start_memory_sampling(self, interval=None, phase="training"):
         """
         Start a background thread that samples RSS memory at *interval* seconds.
 
@@ -82,12 +91,13 @@ class ResourceProfiler:
             self._memory_sampling = False
             self._memory_sample_thread.join(timeout=1)
 
+        effective_interval = interval if interval is not None else self.memory_interval
         self._current_memory_phase = phase
         self._memory_samples       = []
         self._memory_sampling      = True
         self._memory_sample_thread = threading.Thread(
             target=self._memory_sampler,
-            args=(interval,),
+            args=(effective_interval,),
             daemon=True,
         )
         self._memory_sample_thread.start()
@@ -144,9 +154,10 @@ class ResourceProfiler:
     def _tracemalloc_snapshot(self, phase):
         if tracemalloc.is_tracing():
             current, peak = tracemalloc.get_traced_memory()
-            tracemalloc.stop()
         else:
-            current, peak = 0, 0
+            tracemalloc.start()
+            current, peak = tracemalloc.get_traced_memory()
+            tracemalloc.stop()
         self.results["memory"][phase] = {
             "current_mb": round(current / 1e6, 3),
             "peak_mb":    round(peak    / 1e6, 3),
@@ -174,11 +185,8 @@ class ResourceProfiler:
             "data_size_mb":  data_size,
         })
 
-        if model_size is not None and data_size is not None:
-            if data_size > 0:
-                self.results["storage"]["model_to_data_ratio"] = round(model_size / data_size, 4)
-            elif model_size > 0:
-                self.results["storage"]["data_to_model_ratio"] = round(data_size / model_size, 4)
+        if model_size is not None and data_size is not None and data_size > 0:
+            self.results["storage"]["model_to_data_ratio"] = round(model_size / data_size, 4)
 
     def log_storage_extra(self, key: str, value):
         """
@@ -212,8 +220,7 @@ class ResourceProfiler:
     # ------------------------------------------------------------------
 
     def export(self) -> dict:
-        """Return a shallow copy of the current results dict."""
-        return dict(self.results)
+        return copy.deepcopy(self.results)
 
     def save(self, label: str) -> None:
         """

@@ -46,6 +46,7 @@ time:
 
 memory:
   enabled: true
+  interval: 0.1    # RSS sampling interval in seconds
 
 storage:
   enabled: true
