@@ -547,59 +547,176 @@ def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
 
 
 # ===========================================================
+# BOXPLOT GRID (BOOTSTRAP) — models × datasets, one fig per metric
+# ===========================================================
+
+def plot_boxplot_grid(metric, palette=None, save_dir=None,
+                     bootstrap_path="results/bootstrap/aggregated.json",
+                     viz_cfg_path="config/visualization.yaml"):
+    """
+    Multi-panel boxplot for one metric.
+    Rows = models, columns = datasets. Y-axis range shared across all panels.
+    X-axis ticks = modes (Real, Synthetic, FHE N-bit).
+    """
+    cfg = _load_viz_config(viz_cfg_path)
+    box_cfg = cfg["boxplot"]
+    font_cfg = cfg["fonts"]
+    fig_cfg = cfg["figures"]
+
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
+    if palette is None:
+        palette = cfg["colors"]["palette"]
+    if save_dir is None:
+        save_dir = Path(fig_cfg["dir"])
+
+    df = load_bootstrap(bootstrap_path)
+    df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
+    df = df.dropna(subset=[metric])
+
+    if df.empty:
+        return None
+
+    models = sorted(df["model"].unique())
+    datasets = sorted(df["dataset"].unique())
+    global_order = sorted(df["mode_label"].unique(), key=_mode_label_sort_key)
+
+    n_rows = len(models)
+    n_cols = len(datasets)
+
+    show_means = box_cfg["showmeans"]
+    meanprops = {
+        "marker": "D",
+        "markerfacecolor": box_cfg["mean_marker_color"],
+        "markeredgecolor": box_cfg["mean_marker_color"],
+        "markersize": box_cfg["mean_marker_size"],
+    } if show_means else {}
+
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=(n_cols * 3.0, n_rows * 3.5),
+        squeeze=False,
+    )
+
+    for r_idx, model in enumerate(models):
+        for c_idx, dataset in enumerate(datasets):
+            ax = axes[r_idx][c_idx]
+            subset = df[(df["model"] == model) & (df["dataset"] == dataset)]
+
+            if subset.empty:
+                ax.set_visible(False)
+                continue
+
+            local_order = [m for m in global_order if m in subset["mode_label"].values]
+
+            sns.boxplot(
+                data=subset,
+                x="mode_label",
+                y=metric,
+                hue="mode_label",
+                hue_order=local_order,
+                order=local_order,
+                palette=palette,
+                linewidth=box_cfg["linewidth"],
+                notch=box_cfg["notch"],
+                showmeans=show_means,
+                meanprops=meanprops,
+                legend=False,
+                ax=ax,
+            )
+
+            for patch in ax.patches:
+                patch.set_alpha(box_cfg["alpha"])
+
+            sns.stripplot(
+                data=subset,
+                x="mode_label",
+                y=metric,
+                hue="mode_label",
+                hue_order=local_order,
+                order=local_order,
+                palette=palette,
+                dodge=False,
+                alpha=box_cfg["strip_alpha"],
+                size=box_cfg["strip_size"],
+                legend=False,
+                ax=ax,
+            )
+
+            if box_cfg.get("despine", True):
+                sns.despine(ax=ax)
+
+            grid_alpha = box_cfg.get("grid_alpha", 0.0)
+            if grid_alpha > 0:
+                ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
+
+            if r_idx == 0:
+                ax.set_title(
+                    dataset.replace("_", " ").title(),
+                    fontsize=font_cfg["label_size"],
+                )
+            else:
+                ax.set_title("")
+
+            if c_idx == 0:
+                ax.set_ylabel(
+                    model.replace("_", " ").title(),
+                    fontsize=font_cfg["label_size"],
+                )
+            else:
+                ax.set_ylabel("")
+
+            ax.set_xlabel("")
+            ax.tick_params(axis="y", labelsize=font_cfg["tick_size"])
+            ax.tick_params(
+                axis="x",
+                labelsize=font_cfg["tick_size"] - 1,
+                labelrotation=40,
+            )
+            for lbl in ax.get_xticklabels():
+                lbl.set_ha("right")
+
+    # shared y-axis range across all visible panels
+    y_values = df[metric].dropna()
+    y_min, y_max = y_values.min(), y_values.max()
+    y_pad = (y_max - y_min) * 0.05 if y_max > y_min else 0.05
+    for ax_row in axes:
+        for ax in ax_row:
+            if ax.get_visible():
+                ax.set_ylim(y_min - y_pad, y_max + y_pad)
+
+    fig.suptitle(
+        format_metric_name(metric),
+        fontsize=font_cfg["title_size"],
+        fontweight=font_cfg["title_weight"],
+    )
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    fmt = fig_cfg["format"]
+    save_path = Path(save_dir) / f"boxplot_grid_{metric}.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt)
+    plt.close()
+
+    return fig
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
 def generate_all_figures():
-
-    metrics_df = load_metrics()
-    profiles_df = load_resource_profiles()
-
-    metrics_df = preprocess_metrics(metrics_df)
-    full_df = merge_metrics_profiles(metrics_df, profiles_df)
-
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load metrics dynamically from config
-    metrics = get_metrics_from_config()
+    cfg = _load_viz_config()
+    metrics = cfg.get("metrics", [])
 
-    # -------------------------------------------------------
-    # BAR PLOTS (GRID PER DATASET)
-    # -------------------------------------------------------
+    df = load_bootstrap()
+    available_cols = set(df.columns)
+
     for metric in metrics:
-        if metric in full_df.columns:
-            plot_performance_grid(full_df, metric)
-
-    # -------------------------------------------------------
-    # TRADEOFF PLOTS (ALL COMBINATIONS)
-    # -------------------------------------------------------
-    for metric in metrics:
-        if metric not in full_df.columns:
-            continue
-
-        for resource in RESOURCE_MAP.keys():
-            plot_tradeoff(full_df, metric, resource)
-
-    # -------------------------------------------------------
-    # FHE ABLATION
-    # -------------------------------------------------------
-    for metric in metrics:
-        if metric in full_df.columns:
-            plot_fhe_ablation(full_df, metric)
-
-    # -------------------------------------------------------
-    # BOXPLOTS (BOOTSTRAP)
-    # -------------------------------------------------------
-    bootstrap_df = load_bootstrap()
-    all_metrics = metrics + list(RESOURCE_MAP.keys())
-    for dataset in bootstrap_df["dataset"].unique():
-        for model in bootstrap_df["model"].unique():
-            for metric in all_metrics:
-                col = RESOURCE_MAP[metric][0] if metric in RESOURCE_MAP else metric
-                if col in bootstrap_df.columns:
-                    plot_boxplot(dataset, model, col)
-
-    # -------------------------------------------------------
-    # SAVE MERGED TABLE
-    # -------------------------------------------------------
-    full_df.to_csv("results/summary_visualization.csv", index=False)
+        if metric in available_cols:
+            plot_boxplot_grid(metric)

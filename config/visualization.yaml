@@ -34,3 +34,13 @@ boxplot:
   strip_size: 2.5
   grid_alpha: 0.15
   despine: true            # remove top and right spines
+
+metrics:
+  - accuracy
+  - precision
+  - recall
+  - f1
+  - roc_auc
+  - train_time
+  - inf_time_per_sample
+  - mem_inf_peak
