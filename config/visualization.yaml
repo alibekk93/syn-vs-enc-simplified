@@ -19,9 +19,19 @@ fonts:
   label_size: 11
   tick_size: 10
 
-colors:
-  palette: "Set2"          # cleaner than tab10; or use a dict for full control
-  strip_color: "0.55"      # neutral gray for jittered points when no hue
+# Per-mode display labels and colors.
+# fhe: all FHE N-bit modes share base_color; lightness is auto-varied by n_bits
+#      (lowest n_bits = lightest, highest = darkest).
+modes:
+  standard:
+    label: "Real"
+    color: "#2ca02c"
+  gaussian_copula:
+    label: "Synthetic"
+    color: "#ff7f0e"
+  fhe:
+    label_prefix: "FHE"
+    base_color: "#1f77b4"
 
 boxplot:
   alpha: 0.65

@@ -1,9 +1,11 @@
 # src/visualization.py
 
+import colorsys
 import json
 import re
 from functools import lru_cache
 from pathlib import Path
+import matplotlib.colors as mcolors
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -433,6 +435,88 @@ def _mode_label_sort_key(label):
     return (2, int(m.group(1)) if m else 0)
 
 
+def _raw_mode_key(mode, n_bits):
+    """Reconstruct the raw aggregated.json key from parsed (mode, n_bits) fields."""
+    if mode == "fhe" and pd.notna(n_bits):
+        return f"fhe_{int(n_bits)}"
+    return mode
+
+
+def _sort_raw_keys(raw_keys):
+    """Order: standard → gaussian_copula → fhe_N (ascending N) → everything else."""
+    def _key(k):
+        if k == "standard":
+            return (0, 0)
+        if k == "gaussian_copula":
+            return (1, 0)
+        if k.startswith("fhe_"):
+            try:
+                return (2, int(k.split("_")[1]))
+            except ValueError:
+                return (2, 0)
+        return (3, 0)
+    return sorted(raw_keys, key=_key)
+
+
+def _build_mode_display(cfg, raw_keys):
+    """
+    Build label and color mappings from visualization config.
+
+    Returns
+    -------
+    label_map : dict  raw_key -> display label
+    color_map : dict  display_label -> hex color  (for seaborn palette=)
+    """
+    modes_cfg = cfg.get("modes", {})
+
+    fhe_raw = [k for k in raw_keys if k.startswith("fhe_")]
+    fhe_n_bits_present = sorted(
+        int(k.split("_")[1]) for k in fhe_raw if k.split("_")[1].isdigit()
+    )
+
+    fhe_cfg = modes_cfg.get("fhe", {})
+    fhe_prefix = fhe_cfg.get("label_prefix", "FHE")
+    fhe_base = fhe_cfg.get("base_color", "#1f77b4")
+
+    # Precompute FHE shading: lightest for lowest n_bits, darkest for highest
+    fhe_colors = {}
+    if fhe_n_bits_present:
+        n_min, n_max = fhe_n_bits_present[0], fhe_n_bits_present[-1]
+        r, g, b = mcolors.to_rgb(fhe_base)
+        h, _l, s = colorsys.rgb_to_hls(r, g, b)
+        for n in fhe_n_bits_present:
+            if n_min == n_max:
+                fhe_colors[n] = fhe_base
+            else:
+                t = (n - n_min) / (n_max - n_min)   # 0 = lightest, 1 = darkest
+                lightness = 0.72 - t * 0.40           # 0.72 → 0.32
+                r2, g2, b2 = colorsys.hls_to_rgb(h, max(0.1, min(0.9, lightness)), s)
+                fhe_colors[n] = mcolors.to_hex((r2, g2, b2))
+
+    label_map = {}
+    color_map = {}
+
+    for key in raw_keys:
+        if key.startswith("fhe_"):
+            try:
+                n = int(key.split("_")[1])
+            except ValueError:
+                n = 0
+            label = f"{fhe_prefix} {n}-bit"
+            color = fhe_colors.get(n, fhe_base)
+        elif key in modes_cfg:
+            label = modes_cfg[key].get("label", key)
+            color = modes_cfg[key].get("color", "#999999")
+        else:
+            label = key
+            color = "#999999"
+
+        label_map[key] = label
+        color_map[label] = color
+
+    return label_map, color_map
+
+
 # ===========================================================
 # BOXPLOTS (BOOTSTRAP)
 # ===========================================================
@@ -567,21 +651,23 @@ def plot_boxplot_grid(metric, palette=None, save_dir=None,
     sns.set_context(cfg.get("context", "paper"))
     plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
 
-    if palette is None:
-        palette = cfg["colors"]["palette"]
     if save_dir is None:
         save_dir = Path(fig_cfg["dir"])
 
     df = load_bootstrap(bootstrap_path)
-    df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
+    df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
     df = df.dropna(subset=[metric])
 
     if df.empty:
         return None
 
+    label_map, color_map = _build_mode_display(cfg, df["mode_key"].unique())
+    df["mode_label"] = df["mode_key"].map(label_map)
+
     models = sorted(df["model"].unique())
     datasets = sorted(df["dataset"].unique())
-    global_order = sorted(df["mode_label"].unique(), key=_mode_label_sort_key)
+    sorted_keys = _sort_raw_keys(df["mode_key"].unique())
+    global_order = [label_map[k] for k in sorted_keys]
 
     n_rows = len(models)
     n_cols = len(datasets)
@@ -609,7 +695,8 @@ def plot_boxplot_grid(metric, palette=None, save_dir=None,
                 ax.set_visible(False)
                 continue
 
-            local_order = [m for m in global_order if m in subset["mode_label"].values]
+            local_keys = set(subset["mode_key"].unique())
+            local_order = [label_map[k] for k in sorted_keys if k in local_keys]
 
             sns.boxplot(
                 data=subset,
@@ -618,7 +705,7 @@ def plot_boxplot_grid(metric, palette=None, save_dir=None,
                 hue="mode_label",
                 hue_order=local_order,
                 order=local_order,
-                palette=palette,
+                palette=color_map,
                 linewidth=box_cfg["linewidth"],
                 notch=box_cfg["notch"],
                 showmeans=show_means,
@@ -637,7 +724,7 @@ def plot_boxplot_grid(metric, palette=None, save_dir=None,
                 hue="mode_label",
                 hue_order=local_order,
                 order=local_order,
-                palette=palette,
+                palette=color_map,
                 dodge=False,
                 alpha=box_cfg["strip_alpha"],
                 size=box_cfg["strip_size"],
