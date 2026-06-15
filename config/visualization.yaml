@@ -27,7 +27,7 @@ modes:
     label: "Real"
     color: "#2ca02c"
   gaussian_copula:
-    label: "Synthetic"
+    label: "Gaussian Copula"
     color: "#ff7f0e"
   fhe:
     label_prefix: "FHE"
