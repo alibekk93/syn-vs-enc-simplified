@@ -14,10 +14,10 @@ context: "paper"
 
 fonts:
   family: "sans-serif"    # matplotlib font.family
-  title_size: 13
+  title_size: 15
   title_weight: "normal"
-  label_size: 11
-  tick_size: 10
+  label_size: 15
+  tick_size: 13
 
 # Per-mode display labels and colors.
 # Each mode belongs to a group (real / synthetic / fhe).
@@ -61,8 +61,8 @@ separators:
   color: "#cccccc"
   linestyle: "--"
   show_group_labels: true
-  group_label_fontsize: 7
-  group_label_color: "#aaaaaa"
+  group_label_fontsize: 13
+  group_label_color: "#333333"
 
 boxplot:
   alpha: 0.65

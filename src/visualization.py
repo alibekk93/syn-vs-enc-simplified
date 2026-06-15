@@ -706,13 +706,7 @@ def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
     _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg)
     _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
 
-    model_pretty = model.replace("_", " ").title()
-    dataset_pretty = dataset.replace("_", " ").title()
-    ax.set_title(
-        f"{format_metric_name(metric)} — {dataset_pretty} / {model_pretty}",
-        fontsize=font_cfg["title_size"],
-        fontweight=font_cfg["title_weight"],
-    )
+    ax.set_title("")
     ax.set_xlabel("", fontsize=font_cfg["label_size"])
     ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
     ax.tick_params(labelsize=font_cfg["tick_size"])
