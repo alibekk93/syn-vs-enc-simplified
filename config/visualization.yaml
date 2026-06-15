@@ -20,18 +20,49 @@ fonts:
   tick_size: 10
 
 # Per-mode display labels and colors.
-# fhe: all FHE N-bit modes share base_color; lightness is auto-varied by n_bits
-#      (lowest n_bits = lightest, highest = darkest).
+# Each mode belongs to a group (real / synthetic / fhe).
+# Colors are auto-computed from the group's base_color + lightness_range —
+# adding a new mode only requires adding an entry here with the correct group.
 modes:
   standard:
     label: "Real"
-    color: "#2ca02c"
+    group: real
   gaussian_copula:
     label: "Gaussian Copula"
-    color: "#ff7f0e"
+    group: synthetic
+  ctgan:
+    label: "CTGAN"
+    group: synthetic
   fhe:
     label_prefix: "FHE"
+    group: fhe
+
+# Group-level color settings.
+# Modes within a group share the base_color hue; lightness_range controls
+# the auto-shading ramp when multiple modes are present in that group.
+# [lightness_max, lightness_min] — lightest member first, darkest last.
+groups:
+  real:
+    label: "Real"
+    base_color: "#2ca02c"
+  synthetic:
+    label: "Synthetic"
+    base_color: "#e07b2a"
+    lightness_range: [0.65, 0.38]
+  fhe:
+    label: "FHE"
     base_color: "#1f77b4"
+    lightness_range: [0.72, 0.32]
+
+# Vertical separator lines drawn between mode groups on boxplots.
+separators:
+  enabled: true
+  linewidth: 0.8
+  color: "#cccccc"
+  linestyle: "--"
+  show_group_labels: true
+  group_label_fontsize: 7
+  group_label_color: "#aaaaaa"
 
 boxplot:
   alpha: 0.65

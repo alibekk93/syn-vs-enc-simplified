@@ -422,17 +422,9 @@ def load_bootstrap(path="results/bootstrap/aggregated.json"):
 
 def _mode_label(mode, n_bits):
     if mode == "fhe" and pd.notna(n_bits):
-        return f"FHE ({int(n_bits)}-bit)"
-    return {"standard": "Real", "gaussian_copula": "Synthetic"}.get(mode, mode)
-
-
-def _mode_label_sort_key(label):
-    if label == "Real":
-        return (0, 0)
-    if label == "Synthetic":
-        return (1, 0)
-    m = re.search(r"(\d+)", label)
-    return (2, int(m.group(1)) if m else 0)
+        return f"FHE {int(n_bits)}-bit"
+    labels = {"standard": "Real", "gaussian_copula": "Gaussian Copula", "ctgan": "CTGAN"}
+    return labels.get(mode, mode)
 
 
 def _raw_mode_key(mode, n_bits):
@@ -443,122 +435,181 @@ def _raw_mode_key(mode, n_bits):
 
 
 def _sort_raw_keys(raw_keys):
-    """Order: standard → gaussian_copula → fhe_N (ascending N) → everything else."""
+    """
+    Order: standard → non-FHE synthetic (alphabetical) → fhe_N (ascending N) → other.
+    Adding a new synthetic mode requires only a config entry — it slots in alphabetically.
+    """
+    _SYNTHETIC_KEYS = {"gaussian_copula", "ctgan"}
+
     def _key(k):
         if k == "standard":
-            return (0, 0)
-        if k == "gaussian_copula":
-            return (1, 0)
+            return (0, 0, k)
+        if k in _SYNTHETIC_KEYS or (k not in {"standard"} and not k.startswith("fhe_")):
+            # synthetic family or unknown non-FHE — alphabetical within slot 1
+            return (1, 0, k)
         if k.startswith("fhe_"):
             try:
-                return (2, int(k.split("_")[1]))
+                return (2, int(k.split("_")[1]), k)
             except ValueError:
-                return (2, 0)
-        return (3, 0)
+                return (2, 0, k)
+        return (3, 0, k)
+
     return sorted(raw_keys, key=_key)
+
+
+def _lightness_ramp(base_color, n, lightness_range):
+    """
+    Return n hex colors along an HLS lightness ramp for the given base_color.
+    lightness_range = [l_max, l_min]  (first item = lightest, last = darkest)
+    """
+    l_max, l_min = lightness_range
+    r, g, b = mcolors.to_rgb(base_color)
+    h, _l, s = colorsys.rgb_to_hls(r, g, b)
+    colors = []
+    for i in range(n):
+        t = i / (n - 1) if n > 1 else 0.5
+        lightness = l_max - t * (l_max - l_min)
+        r2, g2, b2 = colorsys.hls_to_rgb(h, max(0.1, min(0.9, lightness)), s)
+        colors.append(mcolors.to_hex((r2, g2, b2)))
+    return colors
 
 
 def _build_mode_display(cfg, raw_keys):
     """
-    Build label and color mappings from visualization config.
+    Build label, color, and group mappings from visualization config.
 
     Returns
     -------
-    label_map : dict  raw_key -> display label
-    color_map : dict  display_label -> hex color  (for seaborn palette=)
+    label_map      : dict  raw_key -> display label
+    color_map      : dict  display_label -> hex color  (for seaborn palette=)
+    label_group_map: dict  display_label -> group name
     """
     modes_cfg = cfg.get("modes", {})
+    groups_cfg = cfg.get("groups", {})
 
-    fhe_raw = [k for k in raw_keys if k.startswith("fhe_")]
-    fhe_n_bits_present = sorted(
-        int(k.split("_")[1]) for k in fhe_raw if k.split("_")[1].isdigit()
-    )
+    # ── determine group membership for every raw key ────────────────────────
+    def _group_of(key):
+        if key.startswith("fhe_"):
+            return "fhe"
+        return modes_cfg.get(key, {}).get("group", "other")
+
+    # ── gather keys per group (preserving sort order) ────────────────────────
+    sorted_keys = _sort_raw_keys(raw_keys)
+    groups_present = {}  # group -> [raw_keys in order]
+    for k in sorted_keys:
+        g = _group_of(k)
+        groups_present.setdefault(g, []).append(k)
+
+    # ── precompute colors for multi-member groups ─────────────────────────────
+    group_colors = {}  # raw_key -> hex color
+
+    for group, members in groups_present.items():
+        gcfg = groups_cfg.get(group, {})
+        base = gcfg.get("base_color", "#999999")
+        l_range = gcfg.get("lightness_range")
+
+        if len(members) == 1 or not l_range:
+            for k in members:
+                group_colors[k] = base
+        else:
+            ramp = _lightness_ramp(base, len(members), l_range)
+            for k, color in zip(members, ramp):
+                group_colors[k] = color
+
+    # ── build output maps ─────────────────────────────────────────────────────
+    label_map = {}
+    color_map = {}
+    label_group_map = {}
 
     fhe_cfg = modes_cfg.get("fhe", {})
     fhe_prefix = fhe_cfg.get("label_prefix", "FHE")
-    fhe_base = fhe_cfg.get("base_color", "#1f77b4")
-
-    # Precompute FHE shading: lightest for lowest n_bits, darkest for highest
-    fhe_colors = {}
-    if fhe_n_bits_present:
-        n_min, n_max = fhe_n_bits_present[0], fhe_n_bits_present[-1]
-        r, g, b = mcolors.to_rgb(fhe_base)
-        h, _l, s = colorsys.rgb_to_hls(r, g, b)
-        for n in fhe_n_bits_present:
-            if n_min == n_max:
-                fhe_colors[n] = fhe_base
-            else:
-                t = (n - n_min) / (n_max - n_min)   # 0 = lightest, 1 = darkest
-                lightness = 0.72 - t * 0.40           # 0.72 → 0.32
-                r2, g2, b2 = colorsys.hls_to_rgb(h, max(0.1, min(0.9, lightness)), s)
-                fhe_colors[n] = mcolors.to_hex((r2, g2, b2))
-
-    label_map = {}
-    color_map = {}
 
     for key in raw_keys:
+        group = _group_of(key)
+
         if key.startswith("fhe_"):
             try:
                 n = int(key.split("_")[1])
             except ValueError:
                 n = 0
             label = f"{fhe_prefix} {n}-bit"
-            color = fhe_colors.get(n, fhe_base)
         elif key in modes_cfg:
             label = modes_cfg[key].get("label", key)
-            color = modes_cfg[key].get("color", "#999999")
         else:
             label = key
-            color = "#999999"
 
+        color = group_colors.get(key, "#999999")
         label_map[key] = label
         color_map[label] = color
+        label_group_map[label] = group
 
-    return label_map, color_map
+    return label_map, color_map, label_group_map
 
 
 # ===========================================================
 # BOXPLOTS (BOOTSTRAP)
 # ===========================================================
 
-def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
-                 bootstrap_path="results/bootstrap/aggregated.json",
-                 viz_cfg_path="config/visualization.yaml"):
+def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True):
     """
-    Boxplot of bootstrap distributions for one dataset / model / metric combination.
+    Draw vertical separator lines between mode groups and optionally annotate
+    with group name labels just above the axes top.
 
-    x-axis  : modes (Real, Synthetic, FHE N-bit) — one box per mode, colored by mode
-    y-axis  : metric value
-    seeds   : aggregated into the box distribution
+    order           : list of display labels in x-axis order
+    label_group_map : dict  display_label -> group name
     """
-    cfg = _load_viz_config(viz_cfg_path)
-    box_cfg = cfg["boxplot"]
-    font_cfg = cfg["fonts"]
-    fig_cfg = cfg["figures"]
+    sep_cfg = cfg.get("separators", {})
+    if not sep_cfg.get("enabled", True):
+        return
 
-    sns.set_style(cfg.get("style", "white"))
-    sns.set_context(cfg.get("context", "paper"))
-    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+    groups_in_order = [label_group_map.get(lbl, "other") for lbl in order]
+    groups_cfg = cfg.get("groups", {})
 
-    if palette is None:
-        palette = cfg["colors"]["palette"]
-    if save_dir is None:
-        save_dir = Path(fig_cfg["dir"])
+    separator_xpos = []
+    group_spans = []   # (group_name, start_idx, end_idx)
+    current_group = groups_in_order[0]
+    current_start = 0
 
-    df = load_bootstrap(bootstrap_path)
-    df["mode_label"] = df.apply(lambda r: _mode_label(r["mode"], r["n_bits"]), axis=1)
+    for i in range(1, len(groups_in_order)):
+        if groups_in_order[i] != current_group:
+            separator_xpos.append(i - 0.5)
+            group_spans.append((current_group, current_start, i - 1))
+            current_group = groups_in_order[i]
+            current_start = i
+    group_spans.append((current_group, current_start, len(groups_in_order) - 1))
 
-    subset = (
-        df[(df["dataset"] == dataset) & (df["model"] == model)]
-        .dropna(subset=[metric])
-    )
-    if subset.empty:
-        return None, None
+    for xpos in separator_xpos:
+        ax.axvline(
+            x=xpos,
+            color=sep_cfg.get("color", "#cccccc"),
+            linewidth=sep_cfg.get("linewidth", 0.8),
+            linestyle=sep_cfg.get("linestyle", "--"),
+            zorder=0,
+        )
 
-    order = sorted(subset["mode_label"].unique(), key=_mode_label_sort_key)
+    if show_labels and sep_cfg.get("show_group_labels", True):
+        xform = ax.get_xaxis_transform()
+        for group_name, start_idx, end_idx in group_spans:
+            center_x = (start_idx + end_idx) / 2.0
+            label = groups_cfg.get(group_name, {}).get("label", group_name)
+            ax.text(
+                center_x, 1.01,
+                label,
+                transform=xform,
+                ha="center", va="bottom",
+                fontsize=sep_cfg.get("group_label_fontsize", 7),
+                color=sep_cfg.get("group_label_color", "#aaaaaa"),
+                fontstyle="italic",
+                clip_on=False,
+            )
 
-    fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.2), 5))
 
+def _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg):
+    """
+    Render the core boxplot + stripplot layer onto ax.
+    Caller is responsible for separators, styling, and labels.
+    subset must already have a 'mode_label' column.
+    """
     show_means = box_cfg["showmeans"]
     meanprops = {
         "marker": "D",
@@ -574,7 +625,7 @@ def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
         hue="mode_label",
         hue_order=order,
         order=order,
-        palette=palette,
+        palette=color_map,
         linewidth=box_cfg["linewidth"],
         notch=box_cfg["notch"],
         showmeans=show_means,
@@ -593,7 +644,7 @@ def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
         hue="mode_label",
         hue_order=order,
         order=order,
-        palette=palette,
+        palette=color_map,
         dodge=False,
         alpha=box_cfg["strip_alpha"],
         size=box_cfg["strip_size"],
@@ -608,41 +659,20 @@ def plot_boxplot(dataset, model, metric, palette=None, save_dir=None,
     if grid_alpha > 0:
         ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
 
-    model_pretty = model.replace("_", " ").title()
-    ax.set_title(
-        f"{format_metric_name(metric)} — {dataset} / {model_pretty}",
-        fontsize=font_cfg["title_size"],
-        fontweight=font_cfg["title_weight"],
-    )
-    ax.set_xlabel("Mode", fontsize=font_cfg["label_size"])
-    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
-    ax.tick_params(labelsize=font_cfg["tick_size"])
-    plt.xticks(rotation=15)
 
-    plt.tight_layout()
-
-    fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"boxplot_{metric}__{dataset}__{model}.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt)
-    plt.close()
-
-    return fig, ax
-
-
-# ===========================================================
-# BOXPLOT GRID (BOOTSTRAP) — models × datasets, one fig per metric
-# ===========================================================
-
-def plot_boxplot_grid(metric, palette=None, save_dir=None,
-                     bootstrap_path="results/bootstrap/aggregated.json",
-                     viz_cfg_path="config/visualization.yaml"):
+def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
+                 bootstrap_path="results/bootstrap/aggregated.json",
+                 viz_cfg_path="config/visualization.yaml"):
     """
-    Multi-panel boxplot for one metric.
-    Rows = models, columns = datasets. Y-axis range shared across all panels.
-    X-axis ticks = modes (Real, Synthetic, FHE N-bit).
+    Boxplot of bootstrap distributions for one dataset / model / metric combination.
+
+    x-axis  : modes (Real · Gaussian Copula · CTGAN · FHE N-bit), grouped and colored
+    y-axis  : metric value across bootstrap seeds
+
+    Pass pre-loaded df and cfg to avoid repeated I/O when called in a loop.
     """
-    cfg = _load_viz_config(viz_cfg_path)
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
     box_cfg = cfg["boxplot"]
     font_cfg = cfg["fonts"]
     fig_cfg = cfg["figures"]
@@ -654,141 +684,49 @@ def plot_boxplot_grid(metric, palette=None, save_dir=None,
     if save_dir is None:
         save_dir = Path(fig_cfg["dir"])
 
-    df = load_bootstrap(bootstrap_path)
+    if df is None:
+        df = load_bootstrap(bootstrap_path)
+
+    df = df.copy()
     df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
-    df = df.dropna(subset=[metric])
 
-    if df.empty:
-        return None
+    subset = df[(df["dataset"] == dataset) & (df["model"] == model)].dropna(subset=[metric])
+    if subset.empty:
+        return None, None
 
-    label_map, color_map = _build_mode_display(cfg, df["mode_key"].unique())
-    df["mode_label"] = df["mode_key"].map(label_map)
+    label_map, color_map, label_group_map = _build_mode_display(cfg, subset["mode_key"].unique())
+    subset = subset.copy()
+    subset["mode_label"] = subset["mode_key"].map(label_map)
 
-    models = sorted(df["model"].unique())
-    datasets = sorted(df["dataset"].unique())
-    sorted_keys = _sort_raw_keys(df["mode_key"].unique())
-    global_order = [label_map[k] for k in sorted_keys]
+    sorted_keys = _sort_raw_keys(subset["mode_key"].unique())
+    order = [label_map[k] for k in sorted_keys]
 
-    n_rows = len(models)
-    n_cols = len(datasets)
+    fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.4), 5))
 
-    show_means = box_cfg["showmeans"]
-    meanprops = {
-        "marker": "D",
-        "markerfacecolor": box_cfg["mean_marker_color"],
-        "markeredgecolor": box_cfg["mean_marker_color"],
-        "markersize": box_cfg["mean_marker_size"],
-    } if show_means else {}
+    _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg)
+    _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
 
-    fig, axes = plt.subplots(
-        n_rows, n_cols,
-        figsize=(n_cols * 3.0, n_rows * 3.5),
-        squeeze=False,
-    )
-
-    for r_idx, model in enumerate(models):
-        for c_idx, dataset in enumerate(datasets):
-            ax = axes[r_idx][c_idx]
-            subset = df[(df["model"] == model) & (df["dataset"] == dataset)]
-
-            if subset.empty:
-                ax.set_visible(False)
-                continue
-
-            local_keys = set(subset["mode_key"].unique())
-            local_order = [label_map[k] for k in sorted_keys if k in local_keys]
-
-            sns.boxplot(
-                data=subset,
-                x="mode_label",
-                y=metric,
-                hue="mode_label",
-                hue_order=local_order,
-                order=local_order,
-                palette=color_map,
-                linewidth=box_cfg["linewidth"],
-                notch=box_cfg["notch"],
-                showmeans=show_means,
-                meanprops=meanprops,
-                legend=False,
-                ax=ax,
-            )
-
-            for patch in ax.patches:
-                patch.set_alpha(box_cfg["alpha"])
-
-            sns.stripplot(
-                data=subset,
-                x="mode_label",
-                y=metric,
-                hue="mode_label",
-                hue_order=local_order,
-                order=local_order,
-                palette=color_map,
-                dodge=False,
-                alpha=box_cfg["strip_alpha"],
-                size=box_cfg["strip_size"],
-                legend=False,
-                ax=ax,
-            )
-
-            if box_cfg.get("despine", True):
-                sns.despine(ax=ax)
-
-            grid_alpha = box_cfg.get("grid_alpha", 0.0)
-            if grid_alpha > 0:
-                ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
-
-            if r_idx == 0:
-                ax.set_title(
-                    dataset.replace("_", " ").title(),
-                    fontsize=font_cfg["label_size"],
-                )
-            else:
-                ax.set_title("")
-
-            if c_idx == 0:
-                ax.set_ylabel(
-                    model.replace("_", " ").title(),
-                    fontsize=font_cfg["label_size"],
-                )
-            else:
-                ax.set_ylabel("")
-
-            ax.set_xlabel("")
-            ax.tick_params(axis="y", labelsize=font_cfg["tick_size"])
-            ax.tick_params(
-                axis="x",
-                labelsize=font_cfg["tick_size"] - 1,
-                labelrotation=40,
-            )
-            for lbl in ax.get_xticklabels():
-                lbl.set_ha("right")
-
-    # shared y-axis range across all visible panels
-    y_values = df[metric].dropna()
-    y_min, y_max = y_values.min(), y_values.max()
-    y_pad = (y_max - y_min) * 0.05 if y_max > y_min else 0.05
-    for ax_row in axes:
-        for ax in ax_row:
-            if ax.get_visible():
-                ax.set_ylim(y_min - y_pad, y_max + y_pad)
-
-    fig.suptitle(
-        format_metric_name(metric),
+    model_pretty = model.replace("_", " ").title()
+    dataset_pretty = dataset.replace("_", " ").title()
+    ax.set_title(
+        f"{format_metric_name(metric)} — {dataset_pretty} / {model_pretty}",
         fontsize=font_cfg["title_size"],
         fontweight=font_cfg["title_weight"],
     )
+    ax.set_xlabel("", fontsize=font_cfg["label_size"])
+    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
+    ax.tick_params(labelsize=font_cfg["tick_size"])
+    plt.xticks(rotation=20, ha="right")
 
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout()
 
     fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"boxplot_grid_{metric}.{fmt}"
+    save_path = Path(save_dir) / f"boxplot_{metric}__{dataset}__{model}.{fmt}"
     save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
     plt.close()
 
-    return fig
+    return fig, ax
 
 
 # ===========================================================
@@ -802,8 +740,15 @@ def generate_all_figures():
     metrics = cfg.get("metrics", [])
 
     df = load_bootstrap()
+    df = df.dropna(how="all")
     available_cols = set(df.columns)
 
+    datasets = df["dataset"].dropna().unique()
+    models = df["model"].dropna().unique()
+
     for metric in metrics:
-        if metric in available_cols:
-            plot_boxplot_grid(metric)
+        if metric not in available_cols:
+            continue
+        for dataset in datasets:
+            for model in models:
+                plot_boxplot(dataset, model, metric, df=df, cfg=cfg)
