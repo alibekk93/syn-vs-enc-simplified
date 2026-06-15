@@ -76,14 +76,16 @@ def run(
                 # Explicit phase label.
                 synth_profiler.start_memory_sampling(phase="synthesis")
 
-                with synth_profiler.time_block("synthesis"):
+                with synth_profiler.time_block("synthesis_load"):
                     synth.load_data(dataset_name, dataset_cfg=datasets_config)
+                with synth_profiler.time_block("synthesis_fit"):
                     synth.fit()
+                with synth_profiler.time_block("synthesis_sample"):
                     synth.sample()
                     synth.save()
 
                 synth_profiler.stop_memory_sampling()
-                synth_profiler.save(f"{synth_name}__{dataset_name}__synthesis")
+                synth_profiler.save(f"{synth_name}__synthesis__{dataset_name}")
 
                 if skip_training:
                     results[dataset_name][synth_name] = {
@@ -138,7 +140,7 @@ def run(
 
                         # Persist profiling results to disk.
                         train_profiler.save(
-                            f"synthetic__{synth_name}__{model_name}__{dataset_name}"
+                            f"{synth_name}__{model_name}__{dataset_name}"
                         )
 
                     except Exception as e:

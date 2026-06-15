@@ -85,3 +85,4 @@ metrics:
   - train_time
   - inf_time_per_sample
   - mem_inf_peak
+  - synth_fit_time

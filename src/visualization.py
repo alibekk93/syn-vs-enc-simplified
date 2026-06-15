@@ -92,6 +92,7 @@ def load_resource_profiles(base_dir="results/resource_profiles"):
         row = {
             **meta,
             "train_time": sum(data.get("training_time", {}).values()),
+            "synth_fit_time": data.get("training_time", {}).get("synthesis_fit"),
             "inf_time_total": data.get("inference_time", {}).get("total"),
             "inf_time_per_sample": data.get("inference_time", {}).get("per_sample"),
             "mem_train_avg": data.get("memory", {}).get("training", {}).get("average_mb"),
@@ -398,6 +399,7 @@ def load_bootstrap(path="results/bootstrap/aggregated.json"):
                         "dataset": dataset_name,
                         "seed": entry["seed"],
                         "train_time": sum(entry.get("training_time", {}).values()),
+                        "synth_fit_time": entry.get("training_time", {}).get("synthesis_fit"),
                         "inf_time_total": entry.get("inference_time", {}).get("total"),
                         "inf_time_per_sample": entry.get("inference_time", {}).get("per_sample"),
                         "mem_train_avg": entry.get("memory", {}).get("training", {}).get("average_mb"),
@@ -436,23 +438,19 @@ def _raw_mode_key(mode, n_bits):
 
 def _sort_raw_keys(raw_keys):
     """
-    Order: standard → non-FHE synthetic (alphabetical) → fhe_N (ascending N) → other.
-    Adding a new synthetic mode requires only a config entry — it slots in alphabetically.
+    Order: standard → synthetic modes (alphabetical) → fhe_N (ascending N).
+    Any key that is not "standard" and does not start with "fhe_" is treated as
+    synthetic, so new synthesizers slot in automatically without code changes.
     """
-    _SYNTHETIC_KEYS = {"gaussian_copula", "ctgan"}
-
     def _key(k):
         if k == "standard":
             return (0, 0, k)
-        if k in _SYNTHETIC_KEYS or (k not in {"standard"} and not k.startswith("fhe_")):
-            # synthetic family or unknown non-FHE — alphabetical within slot 1
-            return (1, 0, k)
         if k.startswith("fhe_"):
             try:
                 return (2, int(k.split("_")[1]), k)
             except ValueError:
                 return (2, 0, k)
-        return (3, 0, k)
+        return (1, 0, k)
 
     return sorted(raw_keys, key=_key)
 
