@@ -12,6 +12,7 @@
 - sequential trace
 - adversarial random forest
 - diffusion
+- % oversampling (e.g. 100 is same as original)
 
 ### methodology
 - bug: inference time FHE n_bits 2
