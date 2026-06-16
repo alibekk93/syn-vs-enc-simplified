@@ -19,6 +19,7 @@ ENV/
 data/
 results/
 models/
+synthesizers/
 
 # --- Model files ---
 *.pkl
