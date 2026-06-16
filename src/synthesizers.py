@@ -2,6 +2,7 @@
 """Synthesizer class for fitting and sampling synthetic tabular data."""
 
 import logging
+import warnings
 import pandas as pd
 from pathlib import Path
 from typing import Optional, Union
@@ -9,14 +10,19 @@ from typing import Optional, Union
 from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
 from sdv.metadata import Metadata
 from sklearn.model_selection import train_test_split
+import synthcity.logger as synthcity_log
 from synthcity.plugins import Plugins
 from synthcity.utils.serialization import save_to_file, load_from_file
 
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
-for _lib in ("sdv", "rdt", "copulas", "synthcity"):
+for _lib in ("sdv", "rdt", "copulas"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
+
+# synthcity logs through loguru (not stdlib logging) and adds its own
+# CRITICAL stderr sink on import — drop it, we log via `logger` above instead.
+synthcity_log.remove()
 
 # SDV synthesizers need their constructor class; synthcity synthesizers are
 # created by name through Plugins().get(name, **params).
@@ -33,6 +39,10 @@ SUPPORTED_SYNTHESIZERS = {
     "nflow": "synthcity",
     "arf": "synthcity",
 }
+
+# Plugins() re-scans every plugin file (including ones with unmet optional
+# deps, e.g. goggle) on each instantiation — build it once and reuse it.
+_SYNTHCITY_PLUGINS = Plugins()
 
 
 class Synthesizer:
@@ -173,14 +183,16 @@ class Synthesizer:
 
             self.synthesizer = SDV_SYNTHESIZER_CLASSES[self.method](metadata, **params)
         else:
-            self.synthesizer = Plugins().get(
+            self.synthesizer = _SYNTHCITY_PLUGINS.get(
                 self.method,
                 workspace=self.synthesizers_dir / ".synthcity_workspace",
                 **params,
             )
 
         logger.debug(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
-        self.synthesizer.fit(self.df)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=UserWarning)
+            self.synthesizer.fit(self.df)
         logger.debug(f"[{self.name}] Fitting complete")
 
     def sample(self, num_rows: Optional[Union[int, str]] = None) -> pd.DataFrame:
@@ -205,7 +217,9 @@ class Synthesizer:
         if self.library == "sdv":
             synthetic_df = self.synthesizer.sample(num_rows=num_rows)
         else:
-            synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", category=UserWarning)
+                synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
         logger.debug(f"[{self.name}] Sampling complete")
 
         self._save_synthetic(synthetic_df)
