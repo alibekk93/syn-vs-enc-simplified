@@ -12,14 +12,18 @@ import logging
 import random
 import numpy as np
 
-from src.utils import load_config
-from pipelines import preprocessing, standard, synthetic, fhe, bootstrap
-
+# Configure logging before importing pipelines — synthcity's dependency tree
+# (transformers, optuna, pgmpy, ...) attaches its own root logging handlers
+# on import, which makes a later basicConfig() call a silent no-op.
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    force=True,
 )
 logger = logging.getLogger(__name__)
+
+from src.utils import load_config
+from pipelines import preprocessing, standard, synthetic, fhe, bootstrap
 
 
 # --------------------------------------------------
