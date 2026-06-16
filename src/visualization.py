@@ -93,6 +93,8 @@ def load_resource_profiles(base_dir="results/resource_profiles"):
             **meta,
             "train_time": sum(data.get("training_time", {}).values()),
             "synth_fit_time": data.get("training_time", {}).get("synthesis_fit"),
+            "fhe_fit_time": data.get("training_time", {}).get("training_fit"),
+            "fhe_compile_time": data.get("training_time", {}).get("training_compile"),
             "inf_time_total": data.get("inference_time", {}).get("total"),
             "inf_time_per_sample": data.get("inference_time", {}).get("per_sample"),
             "mem_train_avg": data.get("memory", {}).get("training", {}).get("average_mb"),
@@ -400,6 +402,8 @@ def load_bootstrap(path="results/bootstrap/aggregated.json"):
                         "seed": entry["seed"],
                         "train_time": sum(entry.get("training_time", {}).values()),
                         "synth_fit_time": entry.get("training_time", {}).get("synthesis_fit"),
+                        "fhe_fit_time": entry.get("training_time", {}).get("training_fit"),
+                        "fhe_compile_time": entry.get("training_time", {}).get("training_compile"),
                         "inf_time_total": entry.get("inference_time", {}).get("total"),
                         "inf_time_per_sample": entry.get("inference_time", {}).get("per_sample"),
                         "mem_train_avg": entry.get("memory", {}).get("training", {}).get("average_mb"),
@@ -722,6 +726,226 @@ def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
 
 # ===========================================================
+# FHE COST DECOMPOSITION
+# ===========================================================
+
+_FHE_MARKERS = ["o", "s", "^", "D", "v", "P"]
+
+
+def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
+                                viz_cfg_path="config/visualization.yaml"):
+    """
+    Horizontal stacked bar: fit time (grey) + compile time (FHE blue gradient by n_bits).
+    One figure per dataset.  Filename: fhe_training_breakdown__{dataset}.{fmt}
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    font_cfg = cfg["fonts"]
+    fig_cfg  = cfg["figures"]
+    fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
+    fhe_df = df[df["mode"] == "fhe"].dropna(
+        subset=["fhe_fit_time", "fhe_compile_time", "n_bits"]
+    )
+    if fhe_df.empty:
+        return
+
+    for dataset in fhe_df["dataset"].dropna().unique():
+        subset = fhe_df[fhe_df["dataset"] == dataset]
+
+        agg = (
+            subset.groupby(["model", "n_bits"])[["fhe_fit_time", "fhe_compile_time"]]
+            .mean()
+            .reset_index()
+            .sort_values(["model", "n_bits"])
+            .reset_index(drop=True)
+        )
+
+        y_labels = [
+            f"{r.model.replace('_', ' ').title()}  n={int(r.n_bits)}"
+            for _, r in agg.iterrows()
+        ]
+        y_pos = list(range(len(agg)))
+
+        n_bits_sorted  = sorted(agg["n_bits"].unique())
+        base_color     = fhe_gcfg.get("base_color", "#1f77b4")
+        l_range        = fhe_gcfg.get("lightness_range", [0.72, 0.32])
+        compile_colors = _lightness_ramp(base_color, len(n_bits_sorted), l_range)
+        nbits_color    = dict(zip(n_bits_sorted, compile_colors))
+
+        fig, ax = plt.subplots(figsize=(8, max(4, len(agg) * 0.45)))
+
+        ax.barh(y_pos, agg["fhe_fit_time"], color="#cccccc", height=0.6, label="Fit")
+
+        for nb in n_bits_sorted:
+            nb_rows  = agg[agg["n_bits"] == nb]
+            y_subset = nb_rows.index.tolist()
+            ax.barh(
+                y_subset,
+                nb_rows["fhe_compile_time"].values,
+                left=nb_rows["fhe_fit_time"].values,
+                color=nbits_color[nb],
+                height=0.6,
+                label=f"Compile  n={int(nb)}",
+            )
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(y_labels, fontsize=font_cfg["tick_size"])
+        ax.set_xlabel("Time (s)", fontsize=font_cfg["label_size"])
+        ax.set_title("")
+        ax.legend(
+            fontsize=max(font_cfg["tick_size"] - 2, 8),
+            loc="lower right",
+            frameon=False,
+            ncol=2,
+        )
+        sns.despine(ax=ax)
+        plt.tight_layout()
+
+        fmt       = fig_cfg["format"]
+        save_path = Path(save_dir) / f"fhe_training_breakdown__{dataset}.{fmt}"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, format=fmt, bbox_inches="tight")
+        plt.close()
+
+
+def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
+                             viz_cfg_path="config/visualization.yaml"):
+    """
+    Two-panel scatter: circuit complexity vs compile time (left) and vs inference
+    time per sample (right).  Color encodes n_bits; marker shape encodes model.
+    One figure per dataset.  Filename: fhe_complexity_cost__{dataset}.{fmt}
+    """
+    import matplotlib.patches as mpatches
+    from matplotlib.lines import Line2D
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    font_cfg = cfg["fonts"]
+    fig_cfg  = cfg["figures"]
+    fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
+    needed = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample", "n_bits"]
+    fhe_df = df[df["mode"] == "fhe"].dropna(subset=needed)
+    if fhe_df.empty:
+        return
+
+    for dataset in fhe_df["dataset"].dropna().unique():
+        subset = fhe_df[fhe_df["dataset"] == dataset]
+
+        agg = (
+            subset.groupby(["model", "n_bits"])[needed]
+            .mean()
+            .reset_index()
+        )
+
+        models_sorted = sorted(agg["model"].unique())
+        n_bits_sorted = sorted(agg["n_bits"].unique())
+        model_markers = {
+            m: _FHE_MARKERS[i % len(_FHE_MARKERS)]
+            for i, m in enumerate(models_sorted)
+        }
+
+        base_color   = fhe_gcfg.get("base_color", "#1f77b4")
+        l_range      = fhe_gcfg.get("lightness_range", [0.72, 0.32])
+        point_colors = _lightness_ramp(base_color, len(n_bits_sorted), l_range)
+        nbits_color  = dict(zip(n_bits_sorted, point_colors))
+
+        panels = [
+            ("fhe_compile_time",    "Compile Time (s)"),
+            ("inf_time_per_sample", "Inference Time per Sample (s)"),
+        ]
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+
+        for (y_col, y_label), ax in zip(panels, axes):
+            for model in models_sorted:
+                m_data = agg[agg["model"] == model].sort_values("circuit_complexity")
+                ax.plot(
+                    m_data["circuit_complexity"],
+                    m_data[y_col],
+                    color="#cccccc",
+                    linewidth=0.8,
+                    zorder=1,
+                )
+
+            for model in models_sorted:
+                for nb in n_bits_sorted:
+                    pt = agg[(agg["model"] == model) & (agg["n_bits"] == nb)]
+                    if pt.empty:
+                        continue
+                    ax.scatter(
+                        pt["circuit_complexity"].values,
+                        pt[y_col].values,
+                        color=nbits_color[nb],
+                        marker=model_markers[model],
+                        s=55,
+                        zorder=2,
+                        edgecolors="none",
+                    )
+
+            ax.set_xlabel("Circuit Complexity", fontsize=font_cfg["label_size"])
+            ax.set_ylabel(y_label, fontsize=font_cfg["label_size"])
+            ax.set_title("")
+            ax.tick_params(labelsize=font_cfg["tick_size"])
+            sns.despine(ax=ax)
+
+        legend_fs       = max(font_cfg["tick_size"] - 2, 8)
+        legend_title_fs = max(font_cfg["tick_size"] - 1, 9)
+
+        color_handles = [
+            mpatches.Patch(color=nbits_color[nb], label=f"n={int(nb)}")
+            for nb in n_bits_sorted
+        ]
+        marker_handles = [
+            Line2D(
+                [0], [0],
+                marker=model_markers[m],
+                color="grey",
+                linestyle="None",
+                markersize=7,
+                label=m.replace("_", " ").title(),
+            )
+            for m in models_sorted
+        ]
+
+        axes[0].legend(
+            handles=color_handles,
+            title="Precision",
+            fontsize=legend_fs,
+            title_fontsize=legend_title_fs,
+            loc="upper left",
+            frameon=False,
+        )
+        axes[1].legend(
+            handles=marker_handles,
+            title="Model",
+            fontsize=legend_fs,
+            title_fontsize=legend_title_fs,
+            loc="upper left",
+            frameon=False,
+        )
+
+        plt.tight_layout()
+
+        fmt       = fig_cfg["format"]
+        save_path = Path(save_dir) / f"fhe_complexity_cost__{dataset}.{fmt}"
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(save_path, format=fmt, bbox_inches="tight")
+        plt.close()
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
@@ -744,3 +968,6 @@ def generate_all_figures():
         for dataset in datasets:
             for model in models:
                 plot_boxplot(dataset, model, metric, df=df, cfg=cfg)
+
+    plot_fhe_training_breakdown(df, cfg=cfg)
+    plot_fhe_complexity_cost(df, cfg=cfg)

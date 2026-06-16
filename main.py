@@ -12,7 +12,7 @@ import logging
 import random
 import numpy as np
 
-from src.utils import load_config, generate_seeds, aggregate_bootstrap
+from src.utils import load_config
 from pipelines import preprocessing, standard, synthetic, fhe, bootstrap
 
 logging.basicConfig(
@@ -66,21 +66,29 @@ def run_experiment(config_path: str):
     fhe_mode     = cfg.get("fhe_mode", "simulate")
     pipelines_cfg = cfg.get("pipelines", {})
 
+    logger.info(f"=== Starting full pipeline (config: {config_path}) ===")
+
     if pipelines_cfg.get("preprocessing"):
+        logger.info("=== Preprocessing ===")
         preprocessing.run(datasets=datasets)
 
     if pipelines_cfg.get("raw"):
+        logger.info("=== Raw ===")
         standard.run(datasets=datasets, models=models)
 
     if pipelines_cfg.get("synthetic"):
+        logger.info("=== Synthetic ===")
         synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
 
     if pipelines_cfg.get("fhe"):
+        logger.info("=== FHE ===")
         fhe.run(
             datasets=datasets,
             models=models,
             fhe_mode=fhe_mode
         )
+
+    logger.info("=== Experiment complete ===")
 
 
 def run_single_bootstrap(config_path: str, seed: int):
@@ -113,6 +121,17 @@ def create_visuals():
     generate_all_figures()
     logger.info("=== Visualization complete ===")
 
+
+def generate_seeds(seed: int, length: int):
+    """Generate a list of random seeds and save to file."""
+    random.seed(seed)
+    # Generate list of integers in a large range, e.g., 0 to 2**32 - 1
+    seeds = [random.randint(0, 2**32 - 1) for _ in range(length)]
+    # Write to file, one per line
+    with open("bootstrap_seeds.txt", "w") as f:
+        for s in seeds:
+            f.write(f"{s}\n")
+    logger.info(f"Generated {length} seeds and saved to bootstrap_seeds.txt")
 
 # --------------------------------------------------
 # CLI
@@ -174,22 +193,6 @@ if __name__ == "__main__":
         help="Number of seeds to generate (default: 1000)"
     )
 
-    # ---- aggregate-bootstrap ----
-    agg_parser = subparsers.add_parser(
-        "aggregate-bootstrap",
-        help="Concatenate all bootstrap results into a single hierarchical JSON file"
-    )
-    agg_parser.add_argument(
-        "--results-dir",
-        default="results/bootstrap",
-        help="Directory containing per-seed bootstrap results (default: results/bootstrap)"
-    )
-    agg_parser.add_argument(
-        "--output",
-        default="results/bootstrap/aggregated.json",
-        help="Output file path (default: results/bootstrap/aggregated.json)"
-    )
-
     args = parser.parse_args()
 
     if args.command == "run-experiment":
@@ -203,6 +206,3 @@ if __name__ == "__main__":
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)
-
-    elif args.command == "aggregate-bootstrap":
-        aggregate_bootstrap(args.results_dir, args.output)
