@@ -9,16 +9,29 @@ from typing import Optional, Union
 from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
 from sdv.metadata import Metadata
 from sklearn.model_selection import train_test_split
+from synthcity.plugins import Plugins
+from synthcity.utils.serialization import save_to_file, load_from_file
 
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
-for _lib in ("sdv", "rdt", "copulas"):
+for _lib in ("sdv", "rdt", "copulas", "synthcity"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
 
-SUPPORTED_SYNTHESIZERS = {
+# SDV synthesizers need their constructor class; synthcity synthesizers are
+# created by name through Plugins().get(name, **params).
+SDV_SYNTHESIZER_CLASSES = {
     "gaussian_copula": GaussianCopulaSynthesizer,
     "ctgan": CTGANSynthesizer,
+}
+
+# Maps synthesizer name -> backing library ("sdv" or "synthcity").
+SUPPORTED_SYNTHESIZERS = {
+    "gaussian_copula": "sdv",
+    "ctgan": "sdv",
+    "bayesian_network": "synthcity",
+    "nflow": "synthcity",
+    "arf": "synthcity",
 }
 
 
@@ -69,7 +82,9 @@ class Synthesizer:
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
-        
+
+        self.library           = SUPPORTED_SYNTHESIZERS[self.method]
+
         self.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         self.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
 
@@ -147,14 +162,22 @@ class Synthesizer:
         if self.df is None:
             raise RuntimeError("Call load_data() before fit()")
 
-        metadata = Metadata.detect_from_dataframe(self.df)
-        logger.debug(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
-
         params = self.synth_cfg.get("parameters") or {}
-        if not params.get("numerical_distributions"):
-            params.pop("numerical_distributions", None)
 
-        self.synthesizer = SUPPORTED_SYNTHESIZERS[self.method](metadata, **params)
+        if self.library == "sdv":
+            metadata = Metadata.detect_from_dataframe(self.df)
+            logger.debug(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
+
+            if not params.get("numerical_distributions"):
+                params.pop("numerical_distributions", None)
+
+            self.synthesizer = SDV_SYNTHESIZER_CLASSES[self.method](metadata, **params)
+        else:
+            self.synthesizer = Plugins().get(
+                self.method,
+                workspace=self.synthesizers_dir / ".synthcity_workspace",
+                **params,
+            )
 
         logger.debug(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
         self.synthesizer.fit(self.df)
@@ -179,7 +202,10 @@ class Synthesizer:
             num_rows = self.n_rows_original
 
         logger.debug(f"[{self.name}] Sampling {num_rows} rows...")
-        synthetic_df = self.synthesizer.sample(num_rows=num_rows)
+        if self.library == "sdv":
+            synthetic_df = self.synthesizer.sample(num_rows=num_rows)
+        else:
+            synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
         logger.debug(f"[{self.name}] Sampling complete")
 
         self._save_synthetic(synthetic_df)
@@ -192,8 +218,16 @@ class Synthesizer:
 
         self.synthesizers_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthesizers_dir / f"{self.name}__{self.dataset_name}.pkl"
-        self.synthesizer._n_rows_original = self.n_rows_original
-        self.synthesizer.save(str(path))
+
+        if self.library == "sdv":
+            self.synthesizer._n_rows_original = self.n_rows_original
+            self.synthesizer.save(str(path))
+        else:
+            save_to_file(
+                path,
+                {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original},
+            )
+
         logger.debug(f"[{self.name}] Synthesizer saved → {path}")
 
     @classmethod
@@ -205,14 +239,21 @@ class Synthesizer:
         instance = cls.__new__(cls)
         instance.name         = name
         instance.cfg          = load_config(cfg)
-        instance.synth_cfg    = instance.cfg.get(name, {})
-        instance.method       = instance.synth_cfg.get("method", name)
+        instance.synth_cfg    = instance.cfg.get("methods", {}).get(name, {})
+        instance.method       = name
+        instance.library      = SUPPORTED_SYNTHESIZERS[name]
         output_cfg            = instance.cfg.get("output", {})
         instance.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         instance.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
         instance.dataset_name     = stem[1] if len(stem) > 1 else None
-        instance.synthesizer     = SUPPORTED_SYNTHESIZERS[instance.method].load(str(path))
-        instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
+
+        if instance.library == "sdv":
+            instance.synthesizer     = SDV_SYNTHESIZER_CLASSES[name].load(str(path))
+            instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
+        else:
+            payload = load_from_file(path)
+            instance.synthesizer     = payload["synthesizer"]
+            instance.n_rows_original = payload["n_rows_original"]
 
         logger.debug(f"[{name}] Loaded from {path}")
         return instance

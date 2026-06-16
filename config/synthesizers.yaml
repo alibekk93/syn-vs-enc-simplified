@@ -11,8 +11,11 @@
 #   parameters      Passed directly to the SDV synthesizer constructor
 #
 #   Supported methods:
-#     - gaussian_copula
-#     - ctgan
+#     - gaussian_copula   (SDV)
+#     - ctgan             (SDV)
+#     - bayesian_network  (synthcity, pgmpy-backed)
+#     - nflow             (synthcity, nflows-backed)
+#     - arf               (synthcity, arfpy-backed)
 #
 #   Supported distributions (for gaussian_copula numerical_distributions):
 #     norm, beta, truncnorm, uniform, gamma, gaussian_kde
@@ -53,3 +56,33 @@ methods:
       epochs: 300
       verbose: false
       enable_gpu: true
+
+  bayesian_network:
+    num_rows: same
+    parameters:
+      struct_learning_n_iter: 1000
+      struct_learning_search_method: tree_search   # hillclimb, pc, tree_search, mmhc, exhaustive
+      struct_learning_score: k2                    # k2, bdeu, bic, bds
+      struct_max_indegree: 4
+      encoder_max_clusters: 10
+      encoder_noise_scale: 0.1
+
+  nflow:
+    num_rows: same
+    parameters:
+      n_iter: 1000
+      n_layers_hidden: 1
+      n_units_hidden: 100
+      batch_size: 200
+      dropout: 0.1
+      lr: 0.001
+      base_transform_type: rq-autoregressive   # affine-coupling, quadratic-coupling, rq-coupling, affine-autoregressive, quadratic-autoregressive, rq-autoregressive
+
+  arf:
+    num_rows: same
+    parameters:
+      num_trees: 30
+      delta: 0
+      max_iters: 10
+      early_stop: true
+      min_node_size: 5
