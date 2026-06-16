@@ -60,7 +60,7 @@ methods:
   bayesian_network:
     num_rows: same
     parameters:
-      struct_learning_n_iter: 1000
+      struct_learning_n_iter: 100
       struct_learning_search_method: tree_search   # hillclimb, pc, tree_search, mmhc, exhaustive
       struct_learning_score: k2                    # k2, bdeu, bic, bds
       struct_max_indegree: 4
@@ -70,7 +70,7 @@ methods:
   nflow:
     num_rows: same
     parameters:
-      n_iter: 1000
+      n_iter: 100
       n_layers_hidden: 1
       n_units_hidden: 100
       batch_size: 200
@@ -81,7 +81,7 @@ methods:
   arf:
     num_rows: same
     parameters:
-      num_trees: 30
+      num_trees: 10
       delta: 0
       max_iters: 10
       early_stop: true
