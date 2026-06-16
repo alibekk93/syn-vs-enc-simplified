@@ -4,7 +4,8 @@
 ### visualizations
 - log scale
 - color consistency
-- multi-panel figures
+- FHE-specific resource plots
+- synthesis-specific fitting plots
 - radar plots
 - dynamic pareto?
 
