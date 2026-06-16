@@ -835,7 +835,8 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
     sns.set_context(cfg.get("context", "paper"))
     plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
 
-    needed = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample", "n_bits"]
+    needed   = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample", "n_bits"]
+    agg_cols = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample"]
     fhe_df = df[df["mode"] == "fhe"].dropna(subset=needed)
     if fhe_df.empty:
         return
@@ -844,7 +845,7 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
         subset = fhe_df[fhe_df["dataset"] == dataset]
 
         agg = (
-            subset.groupby(["model", "n_bits"])[needed]
+            subset.groupby(["model", "n_bits"])[agg_cols]
             .mean()
             .reset_index()
         )
