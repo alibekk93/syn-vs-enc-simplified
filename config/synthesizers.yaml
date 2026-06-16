@@ -85,4 +85,5 @@ methods:
       delta: 0
       max_iters: 10
       early_stop: true
+      verbose: false
       min_node_size: 5
