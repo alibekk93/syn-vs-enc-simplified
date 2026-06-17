@@ -2,6 +2,7 @@
 
 ## TD
 ### visualizations
+- mode combination legend
 - log scale
 - color consistency
 - FHE-specific resource plots
@@ -10,10 +11,8 @@
 - dynamic pareto?
 
 ### synthesizers
-- sequential trace
-- adversarial random forest
-- diffusion
 - % oversampling (e.g. 100 is same as original)
+- separate fhe from standard / synth pipelines for DRAC
 
 ### methodology
 - bug: inference time FHE n_bits 2
