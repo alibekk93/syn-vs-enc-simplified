@@ -1,0 +1,28 @@
+# =============================================================================
+# DRAC.yaml — Master Pipeline Configuration for DRAC testing
+# =============================================================================
+#
+# Controls which pipelines run and what they operate on.
+#
+# DATASETS / MODELS / SYNTHESIZERS:
+#   Set to null to run all entries from their respective configs,
+#   or provide a list to run a subset, e.g.:
+#     datasets: [heart_disease, diabetes]
+#
+# FHE_MODE:
+#   disable   — quantized inference in clear (fastest, no FHE)
+#   simulate  — FHE simulation (recommended for development)
+#   execute   — real FHE execution (slow, use for final evaluation)
+#
+# =============================================================================
+
+datasets:     [heart_disease, diabetes, breast_cancer]
+models:       null
+synthesizers: null
+fhe_mode:     disable
+
+pipelines:
+  preprocessing: true
+  raw:           true
+  synthetic:     true
+  fhe:           false
