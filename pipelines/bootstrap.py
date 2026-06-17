@@ -9,7 +9,6 @@ import tempfile
 import os
 
 from src.utils import load_config
-from pipelines import preprocessing, standard, synthetic, fhe
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +99,7 @@ def run(
     seed: int = 42,
     evaluation: dict | None = None,
     fhe_mode: str = "simulate",
+    pipelines_cfg: dict | None = None,
 ) -> dict:
     """
     Bootstrap evaluation pipeline that resamples data and runs full experiment pipeline.
@@ -122,10 +122,17 @@ def run(
         models:   List of model names to use. If None, all models from config are used.
         seed:     Random seed for bootstrap sampling.
         evaluation: Optional evaluation configuration (not currently used).
+        pipelines_cfg: Which stages to run, e.g. {"preprocessing": True, "raw": True,
+            "synthetic": True, "fhe": True}. Stages are imported lazily so a stage's
+            heavy dependencies (e.g. concrete.ml for fhe, sdv/synthcity for synthetic)
+            are only required when that stage is enabled. If None, all stages run.
 
     Returns:
         dict: {dataset: {seed: {pipeline: {model: results}}}}
     """
+    if pipelines_cfg is None:
+        pipelines_cfg = {"preprocessing": True, "raw": True, "synthetic": True, "fhe": True}
+
     targets_datasets = datasets or list(load_config(DATASETS_CFG).keys())
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
 
@@ -168,45 +175,51 @@ def run(
         logger.info(f"Saved bootstrap sample to {bootstrap_raw_path}")
 
         try:
-            # Run preprocessing
-            logger.info(f"Running preprocessing on bootstrap sample for {dataset_name}")
-            prep_results = preprocessing.run(
-                datasets=[dataset_name],
-                datasets_config=str(configs["datasets"]),
-                resource_config=str(configs["resource"])
-            )
+            prep_results, std_results, synth_results, fhe_results = {}, {}, {}, {}
 
-            # Run standard modeling
-            logger.info(f"Running standard modeling on bootstrap sample for {dataset_name}")
-            std_results = standard.run(
-                datasets=[dataset_name],
-                models=targets_models,
-                datasets_config=str(configs["datasets"]),
-                resource_config=str(configs["resource"]),
-                models_config=str(configs["models"])
-            )
+            if pipelines_cfg.get("preprocessing"):
+                logger.info(f"Running preprocessing on bootstrap sample for {dataset_name}")
+                from pipelines import preprocessing
+                prep_results = preprocessing.run(
+                    datasets=[dataset_name],
+                    datasets_config=str(configs["datasets"]),
+                    resource_config=str(configs["resource"])
+                )
 
-            # Run synthetic modeling
-            logger.info(f"Running synthetic modeling on bootstrap sample for {dataset_name}")
-            synth_results = synthetic.run(
-                datasets=[dataset_name],
-                models=targets_models,
-                datasets_config=str(configs["datasets"]),
-                resource_config=str(configs["resource"]),
-                models_config=str(configs["models"]),
-                synthesizers_config=str(configs["synthesizers"])
-            )
+            if pipelines_cfg.get("raw"):
+                logger.info(f"Running standard modeling on bootstrap sample for {dataset_name}")
+                from pipelines import standard
+                std_results = standard.run(
+                    datasets=[dataset_name],
+                    models=targets_models,
+                    datasets_config=str(configs["datasets"]),
+                    resource_config=str(configs["resource"]),
+                    models_config=str(configs["models"])
+                )
 
-            # Run FHE modeling
-            logger.info(f"Running FHE modeling on bootstrap sample for {dataset_name}")
-            fhe_results = fhe.run(
-                datasets=[dataset_name],
-                models=targets_models,
-                datasets_config=str(configs["datasets"]),
-                resource_config=str(configs["resource"]),
-                models_config=str(configs["models"]),
-                fhe_mode=fhe_mode,
-            )
+            if pipelines_cfg.get("synthetic"):
+                logger.info(f"Running synthetic modeling on bootstrap sample for {dataset_name}")
+                from pipelines import synthetic
+                synth_results = synthetic.run(
+                    datasets=[dataset_name],
+                    models=targets_models,
+                    datasets_config=str(configs["datasets"]),
+                    resource_config=str(configs["resource"]),
+                    models_config=str(configs["models"]),
+                    synthesizers_config=str(configs["synthesizers"])
+                )
+
+            if pipelines_cfg.get("fhe"):
+                logger.info(f"Running FHE modeling on bootstrap sample for {dataset_name}")
+                from pipelines import fhe
+                fhe_results = fhe.run(
+                    datasets=[dataset_name],
+                    models=targets_models,
+                    datasets_config=str(configs["datasets"]),
+                    resource_config=str(configs["resource"]),
+                    models_config=str(configs["models"]),
+                    fhe_mode=fhe_mode,
+                )
 
             # Collect results
             results[dataset_name][seed] = {

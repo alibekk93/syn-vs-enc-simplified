@@ -102,10 +102,11 @@ def run_single_bootstrap(config_path: str, seed: int):
     check_torch()
     set_seed(seed)
 
-    cfg          = load_config(config_path)
-    datasets     = cfg.get("datasets")
-    models       = cfg.get("models")
-    fhe_mode     = cfg.get("fhe_mode", "simulate")
+    cfg           = load_config(config_path)
+    datasets      = cfg.get("datasets")
+    models        = cfg.get("models")
+    fhe_mode      = cfg.get("fhe_mode", "simulate")
+    pipelines_cfg = cfg.get("pipelines", {})
 
     logger.info(
         f"=== Running single bootstrap "
@@ -118,6 +119,7 @@ def run_single_bootstrap(config_path: str, seed: int):
         models=models,
         seed=seed,
         fhe_mode=fhe_mode,
+        pipelines_cfg=pipelines_cfg,
     )
 
     logger.info("=== Single bootstrap run complete ===")

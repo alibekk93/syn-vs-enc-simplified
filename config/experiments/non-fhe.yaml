@@ -1,0 +1,23 @@
+# =============================================================================
+# non-fhe.yaml — Non-FHE Venv Configuration
+# =============================================================================
+#
+# Runs preprocessing + raw (standard) + synthetic stages, with the FHE stage
+# disabled. Intended for the virtualenv that has sdv/synthcity installed but
+# not concrete-ml — the fhe stage is disabled here so src.fhe_models (which
+# imports concrete.ml) is never loaded. Pair with fhe-only.yaml run in the
+# FHE venv to reproduce a full main.yaml-equivalent run split across both
+# envs.
+#
+# =============================================================================
+
+datasets:     null
+models:       null
+synthesizers: null
+fhe_mode:     disable
+
+pipelines:
+  preprocessing: true
+  raw:           true
+  synthetic:     true
+  fhe:           false
