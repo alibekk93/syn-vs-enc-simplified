@@ -2,6 +2,7 @@
 
 ## TD
 ### visualizations
+- mode combination legend
 - log scale
 - color consistency
 - FHE-specific resource plots
@@ -10,14 +11,12 @@
 - dynamic pareto?
 
 ### synthesizers
-- sequential trace
-- adversarial random forest
-- diffusion
 - % oversampling (e.g. 100 is same as original)
+- separate fhe from standard / synth pipelines for DRAC
 
 ### methodology
 - bug: inference time FHE n_bits 2
-- bootstrap pre inference: identify a name and research past examples, draft justification
+- bootstrap pre inference: identify a name and research past examples, draft justificationgit a
 - resource metrics
 - MIMIC dataset?
 - multi-class classification?
