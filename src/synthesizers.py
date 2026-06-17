@@ -5,6 +5,12 @@ import contextlib
 import io
 import logging
 import warnings
+
+# transformers logs a torch-version warning on import (pulled in transitively
+# by sdv/synthcity's dependency tree, which never actually needs torch) —
+# silence it before anything below has a chance to trigger that import.
+logging.getLogger("transformers").setLevel(logging.ERROR)
+
 import pandas as pd
 from pathlib import Path
 from typing import Optional, Union
@@ -18,10 +24,6 @@ from src.utils import load_config
 logger = logging.getLogger(__name__)
 for _lib in ("sdv", "rdt", "copulas"):
     logging.getLogger(_lib).setLevel(logging.WARNING)
-# transformers logs a torch-version warning on import (pulled in transitively
-# by synthcity's GReaT plugin, which we never use) — silence it before that
-# import happens.
-logging.getLogger("transformers").setLevel(logging.ERROR)
 
 # Importing/initializing synthcity transitively imports pykeops and compiles
 # its JIT binder, which prints "[KeOps] Compiling ... OK" straight to stdout.

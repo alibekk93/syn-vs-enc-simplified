@@ -1,6 +1,8 @@
 # src/fhe_models.py
 """FHE Model class using Concrete ML for privacy-preserving inference."""
 
+import contextlib
+import io
 import logging
 import json
 import pandas as pd
@@ -8,16 +10,20 @@ import numpy as np
 from pathlib import Path
 from typing import Optional
 
-# Concrete ML serialization
-from concrete.ml.common.serialization.dumpers import dump as cml_dump
-from concrete.ml.common.serialization.loaders import load as cml_load
+# Importing concrete.ml.sklearn walks its internal estimator registry and
+# prints "is_classifier"/"is_regressor" straight to stdout for every wrapped
+# model class — harmless, but swallow it rather than surface it.
+with contextlib.redirect_stdout(io.StringIO()):
+    # Concrete ML serialization
+    from concrete.ml.common.serialization.dumpers import dump as cml_dump
+    from concrete.ml.common.serialization.loaders import load as cml_load
 
-from concrete.ml.sklearn import (
-    LogisticRegression,
-    RandomForestClassifier,
-    XGBClassifier,
-    NeuralNetClassifier,
-)
+    from concrete.ml.sklearn import (
+        LogisticRegression,
+        RandomForestClassifier,
+        XGBClassifier,
+        NeuralNetClassifier,
+    )
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,

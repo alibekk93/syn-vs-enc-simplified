@@ -23,7 +23,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from src.utils import load_config
-from pipelines import preprocessing, standard, synthetic, fhe, bootstrap
 
 
 # --------------------------------------------------
@@ -74,18 +73,22 @@ def run_experiment(config_path: str):
 
     if pipelines_cfg.get("preprocessing"):
         logger.info("=== Preprocessing ===")
+        from pipelines import preprocessing
         preprocessing.run(datasets=datasets)
 
     if pipelines_cfg.get("raw"):
         logger.info("=== Raw ===")
+        from pipelines import standard
         standard.run(datasets=datasets, models=models)
 
     if pipelines_cfg.get("synthetic"):
         logger.info("=== Synthetic ===")
+        from pipelines import synthetic
         synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
 
     if pipelines_cfg.get("fhe"):
         logger.info("=== FHE ===")
+        from pipelines import fhe
         fhe.run(
             datasets=datasets,
             models=models,
@@ -109,6 +112,7 @@ def run_single_bootstrap(config_path: str, seed: int):
         f"(config: {config_path}, seed: {seed}) ==="
     )
 
+    from pipelines import bootstrap
     bootstrap.run(
         datasets=datasets,
         models=models,
