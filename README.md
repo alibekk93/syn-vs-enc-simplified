@@ -9,6 +9,7 @@
 - synthesis-specific fitting plots
 - radar plots
 - dynamic pareto?
+- % oversampling line graph
 
 ### synthesizers
 - % oversampling (e.g. 100 is same as original)
