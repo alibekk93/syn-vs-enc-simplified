@@ -4,12 +4,20 @@
 import contextlib
 import io
 import logging
+import os
 import warnings
 
 # transformers logs a torch-version warning on import (pulled in transitively
 # by sdv/synthcity's dependency tree, which never actually needs torch) —
 # silence it before anything below has a chance to trigger that import.
 logging.getLogger("transformers").setLevel(logging.ERROR)
+
+# bayesian_network's pgmpy structure search reports MI-score warnings from
+# joblib worker processes, which a local catch_warnings() can't reach.
+# Filter UserWarning process-wide — current process via filterwarnings(),
+# and any joblib workers spawned in a fresh interpreter via PYTHONWARNINGS.
+os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
+warnings.filterwarnings("ignore", category=UserWarning)
 
 import pandas as pd
 from pathlib import Path
@@ -203,9 +211,7 @@ class Synthesizer:
             )
 
         logger.debug(f"[{self.name}] Fitting on {self.n_rows_original} rows...")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
-            self.synthesizer.fit(self.df)
+        self.synthesizer.fit(self.df)
         logger.debug(f"[{self.name}] Fitting complete")
 
     def sample(self, num_rows: Optional[Union[int, str]] = None) -> pd.DataFrame:
@@ -230,9 +236,7 @@ class Synthesizer:
         if self.library == "sdv":
             synthetic_df = self.synthesizer.sample(num_rows=num_rows)
         else:
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", category=UserWarning)
-                synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
+            synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
         logger.debug(f"[{self.name}] Sampling complete")
 
         self._save_synthetic(synthetic_df)
