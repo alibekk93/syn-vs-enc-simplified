@@ -6,9 +6,11 @@ import re
 from functools import lru_cache
 from pathlib import Path
 import matplotlib.colors as mcolors
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
 
 FIGURES_DIR = Path("results/figures")
 
@@ -752,15 +754,27 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
     fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.4), 5))
 
-    _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg)
+    # KDE-based violins must be computed in the scale they're meant to represent —
+    # rescaling the axis after the fact (ax.set_yscale("log")) stretches a density
+    # estimated on raw values, distorting the shape. So for log-scale metrics we
+    # log-transform the data first and relabel the (linear) axis to show real units.
+    log_scale = metric in cfg.get("log_scale_metrics", [])
+    plot_col = metric
+    if log_scale:
+        plot_col = f"__log10_{metric}"
+        subset[plot_col] = np.log10(subset[metric].clip(lower=1e-12))
+
+    _draw_violinplot_panel(ax, subset, plot_col, order, color_map, violin_cfg)
     _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
 
-    if metric in cfg.get("log_scale_metrics", []):
-        ax.set_yscale("log")
+    ylabel = format_metric_name(metric)
+    if log_scale:
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda val, pos: f"{10 ** val:g}"))
+        ylabel += " (log scale)"
 
     ax.set_title("")
     ax.set_xlabel("", fontsize=font_cfg["label_size"])
-    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
+    ax.set_ylabel(ylabel, fontsize=font_cfg["label_size"])
     ax.tick_params(labelsize=font_cfg["tick_size"])
     plt.xticks(rotation=20, ha="right")
 
