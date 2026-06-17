@@ -22,7 +22,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from src.utils import load_config
+from src.utils import load_config, aggregate_bootstrap
 
 
 # --------------------------------------------------
@@ -130,6 +130,12 @@ def create_visuals():
     logger.info("=== Visualization complete ===")
 
 
+def aggregate_bootstrap_results(results_dir: str, output_path: str):
+    logger.info("=== Aggregating bootstrap results ===")
+    aggregate_bootstrap(results_dir=results_dir, output_path=output_path)
+    logger.info("=== Aggregation complete ===")
+
+
 def generate_seeds(seed: int, length: int):
     """Generate a list of random seeds and save to file."""
     random.seed(seed)
@@ -183,6 +189,22 @@ if __name__ == "__main__":
         help="Generate visualizations only"
     )
 
+    # ---- aggregate-bootstrap ----
+    aggregate_parser = subparsers.add_parser(
+        "aggregate-bootstrap",
+        help="Aggregate per-seed bootstrap results into a single JSON file"
+    )
+    aggregate_parser.add_argument(
+        "--results-dir",
+        default="results/bootstrap",
+        help="Directory containing per-seed bootstrap result subdirectories (default: results/bootstrap)"
+    )
+    aggregate_parser.add_argument(
+        "--output",
+        default="results/bootstrap/aggregated.json",
+        help="Path to write the aggregated JSON file (default: results/bootstrap/aggregated.json)"
+    )
+
     # ---- generate-seeds ----
     seeds_parser = subparsers.add_parser(
         "generate-seeds",
@@ -211,6 +233,9 @@ if __name__ == "__main__":
 
     elif args.command == "create-visuals":
         create_visuals()
+
+    elif args.command == "aggregate-bootstrap":
+        aggregate_bootstrap_results(args.results_dir, args.output)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)
