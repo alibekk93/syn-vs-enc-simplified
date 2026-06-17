@@ -105,3 +105,8 @@ metrics:
   - inf_time_per_sample
   - mem_inf_peak
   - synth_fit_time
+
+# Metrics plotted with a log-scaled y-axis (e.g. timing/memory metrics that
+# can span orders of magnitude across modes). All other metrics use a linear axis.
+log_scale_metrics:
+  - inf_time_per_sample

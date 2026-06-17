@@ -755,6 +755,9 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
     _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg)
     _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
 
+    if metric in cfg.get("log_scale_metrics", []):
+        ax.set_yscale("log")
+
     ax.set_title("")
     ax.set_xlabel("", fontsize=font_cfg["label_size"])
     ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
@@ -817,6 +820,9 @@ def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
     _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg)
     _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
+
+    if metric in cfg.get("log_scale_metrics", []):
+        ax.set_yscale("log")
 
     ax.set_title("")
     ax.set_xlabel("", fontsize=font_cfg["label_size"])
