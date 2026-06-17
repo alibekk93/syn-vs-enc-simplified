@@ -33,6 +33,15 @@ modes:
   ctgan:
     label: "CTGAN"
     group: synthetic
+  bayesian_network:
+    label: "Bayesian Network"
+    group: synthetic
+  nflow:
+    label: "Normalizing Flow"
+    group: synthetic
+  arf:
+    label: "ARF"
+    group: synthetic
   fhe:
     label_prefix: "FHE"
     group: fhe
@@ -71,6 +80,16 @@ boxplot:
   showmeans: false
   mean_marker_color: "#555555"
   mean_marker_size: 6
+  strip_alpha: 0.25
+  strip_size: 2.5
+  grid_alpha: 0.15
+  despine: true            # remove top and right spines
+
+violinplot:
+  alpha: 0.65
+  linewidth: 0.8
+  inner: "quartile"        # box | quartile | point | stick | None
+  cut: 0
   strip_alpha: 0.25
   strip_size: 2.5
   grid_alpha: 0.15

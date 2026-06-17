@@ -662,6 +662,116 @@ def _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg):
         ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
 
 
+def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg):
+    """
+    Render the core violinplot + stripplot layer onto ax.
+    Caller is responsible for separators, styling, and labels.
+    subset must already have a 'mode_label' column.
+    """
+    sns.violinplot(
+        data=subset,
+        x="mode_label",
+        y=metric,
+        hue="mode_label",
+        hue_order=order,
+        order=order,
+        palette=color_map,
+        linewidth=violin_cfg["linewidth"],
+        inner=violin_cfg["inner"],
+        cut=violin_cfg["cut"],
+        legend=False,
+        ax=ax,
+    )
+
+    for collection in ax.collections:
+        collection.set_alpha(violin_cfg["alpha"])
+
+    sns.stripplot(
+        data=subset,
+        x="mode_label",
+        y=metric,
+        hue="mode_label",
+        hue_order=order,
+        order=order,
+        palette=color_map,
+        dodge=False,
+        alpha=violin_cfg["strip_alpha"],
+        size=violin_cfg["strip_size"],
+        legend=False,
+        ax=ax,
+    )
+
+    if violin_cfg.get("despine", True):
+        sns.despine(ax=ax)
+
+    grid_alpha = violin_cfg.get("grid_alpha", 0.0)
+    if grid_alpha > 0:
+        ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
+
+
+def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
+                    bootstrap_path="results/bootstrap/aggregated.json",
+                    viz_cfg_path="config/visualization.yaml"):
+    """
+    Violin plot of bootstrap distributions for one dataset / model / metric combination.
+
+    x-axis  : modes (Real · Gaussian Copula · CTGAN · FHE N-bit), grouped and colored
+    y-axis  : metric value across bootstrap seeds
+
+    Pass pre-loaded df and cfg to avoid repeated I/O when called in a loop.
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+    violin_cfg = cfg["violinplot"]
+    font_cfg = cfg["fonts"]
+    fig_cfg = cfg["figures"]
+
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
+    if save_dir is None:
+        save_dir = Path(fig_cfg["dir"])
+
+    if df is None:
+        df = load_bootstrap(bootstrap_path)
+
+    df = df.copy()
+    df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
+
+    subset = df[(df["dataset"] == dataset) & (df["model"] == model)].dropna(subset=[metric])
+    if subset.empty:
+        return None, None
+
+    label_map, color_map, label_group_map = _build_mode_display(cfg, subset["mode_key"].unique())
+    subset = subset.copy()
+    subset["mode_label"] = subset["mode_key"].map(label_map)
+
+    sorted_keys = _sort_raw_keys(subset["mode_key"].unique())
+    order = [label_map[k] for k in sorted_keys]
+
+    fig, ax = plt.subplots(figsize=(max(6, len(order) * 1.4), 5))
+
+    _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg)
+    _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
+
+    ax.set_title("")
+    ax.set_xlabel("", fontsize=font_cfg["label_size"])
+    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
+    ax.tick_params(labelsize=font_cfg["tick_size"])
+    plt.xticks(rotation=20, ha="right")
+
+    plt.tight_layout()
+
+    fmt = fig_cfg["format"]
+    save_path = Path(save_dir) / f"violinplot_{metric}__{dataset}__{model}.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+    return fig, ax
+
+
 def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
                  bootstrap_path="results/bootstrap/aggregated.json",
                  viz_cfg_path="config/visualization.yaml"):
@@ -968,7 +1078,7 @@ def generate_all_figures():
             continue
         for dataset in datasets:
             for model in models:
-                plot_boxplot(dataset, model, metric, df=df, cfg=cfg)
+                plot_violinplot(dataset, model, metric, df=df, cfg=cfg)
 
     plot_fhe_training_breakdown(df, cfg=cfg)
     plot_fhe_complexity_cost(df, cfg=cfg)
