@@ -16,7 +16,7 @@
 
 ### methodology
 - bug: inference time FHE n_bits 2
-- bootstrap pre inference: identify a name and research past examples, draft justification
+- bootstrap pre inference: identify a name and research past examples, draft justificationgit a
 - resource metrics
 - MIMIC dataset?
 - multi-class classification?
