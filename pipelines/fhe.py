@@ -1,8 +1,7 @@
-"""FHE training pipeline — trains and evaluates FHE models, with optional n_bits sweep."""
+"""FHE training pipeline — trains and evaluates FHE models."""
 
 import logging
-import copy
-from src.utils import load_config
+from src.utils import load_config, inject_n_bits, model_n_bits
 from src.fhe_models import FHEModel
 from src.resource_profiling import ResourceProfiler
 
@@ -24,57 +23,6 @@ def _log_section(title: str) -> None:
 
 
 # ------------------------------------------------------------------
-# Helpers for n_bits sweep (migrated from ablation.py)
-# ------------------------------------------------------------------
-
-def _expand_n_bits(cfg):
-    """
-    Returns a list of n_bits values to iterate over.
-
-    Behavior:
-        - If sweep not defined -> single run (None)
-        - If list provided     -> return list
-        - If start/end/step    -> expand range
-    """
-    sweep_cfg = cfg.get("sweep", {})
-
-    if not sweep_cfg or not sweep_cfg.get("enabled", False):
-        return [None]
-
-    nb = sweep_cfg.get("n_bits")
-
-    if nb is None:
-        return [None]
-
-    if isinstance(nb, list):
-        return nb
-
-    start = nb.get("start")
-    end   = nb.get("end")
-    step  = nb.get("step", 1)
-
-    if start is None or end is None:
-        return [None]
-
-    return list(range(start, end + 1, step))
-
-
-def _inject_n_bits(fhe_cfg, n_bits):
-    """
-    Inject n_bits into all model configs.
-    """
-    if n_bits is None:
-        return fhe_cfg
-
-    new_cfg = copy.deepcopy(fhe_cfg)
-
-    for model_name in new_cfg.get("models", {}):
-        new_cfg["models"][model_name]["n_bits"] = n_bits
-
-    return new_cfg
-
-
-# ------------------------------------------------------------------
 # Main pipeline
 # ------------------------------------------------------------------
 
@@ -82,146 +30,131 @@ def run(
     datasets: list[str] | None = None,
     models:   list[str] | None = None,
     fhe_mode: str = "simulate",
+    n_bits: int | None = None,
     fhe_config_override=None,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
     models_config: str = "config/models.yaml",
 ) -> dict:
     """
-    Runs FHE pipeline with optional n_bits sweep.
+    Runs the FHE pipeline once, training each model at its configured n_bits.
+
+    To run a single explicit n_bits value across all models, pass `n_bits`.
+    To sweep multiple n_bits values, call this once per value (see
+    `main.py`'s `run-experiment --n-bits N` and `list-n-bits`) — each call
+    is independent and writes uniquely-named output files, so calls can run
+    in parallel as separate processes.
 
     Returns:
-        dict:
-            {
-              n_bits_value: {
-                dataset: {
-                  model: {
-                    metrics,
-                    profiling,
-                    n_bits
-                  }
-                }
-              }
-            }
+        dict: {dataset: {model: {metrics, profiling, n_bits}}}
     """
 
     targets_datasets = datasets or list(load_config(datasets_config).keys())
     targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
-    base_fhe_cfg = fhe_config_override or load_config(FHE_CFG)
-    n_bits_values = _expand_n_bits(base_fhe_cfg)
+    fhe_config = fhe_config_override or load_config(FHE_CFG)
+    if n_bits is not None:
+        fhe_config = inject_n_bits(fhe_config, n_bits)
 
     logger.debug(
         f"FHE pipeline started — datasets: {targets_datasets}, "
-        f"models: {targets_models}, fhe_mode: {fhe_mode}, "
-        f"n_bits sweep: {n_bits_values}"
+        f"models: {targets_models}, fhe_mode: {fhe_mode}"
     )
 
-    all_results = {}
+    _log_section(f"FHE  |  mode: {fhe_mode}")
 
-    # --------------------------------------------------------------
-    # Sweep loop (replaces ablation pipeline)
-    # --------------------------------------------------------------
-    for n_bits in n_bits_values:
-        n_bits_label = f"  |  n_bits={n_bits}" if n_bits is not None else ""
-        _log_section(f"FHE  |  mode: {fhe_mode}{n_bits_label}")
+    results = {}
 
-        logger.debug(f"[FHE] Running n_bits={n_bits}")
+    for dataset_name in targets_datasets:
+        results[dataset_name] = {}
 
-        fhe_config = _inject_n_bits(base_fhe_cfg, n_bits)
-        run_results = {}
+        for model_name in targets_models:
 
-        for dataset_name in targets_datasets:
-            run_results[dataset_name] = {}
+            n_bits_for_model = model_n_bits(fhe_config, model_name)
 
-            for model_name in targets_models:
+            logger.info(f"--- FHE {model_name} on {dataset_name} (n_bits={n_bits_for_model}) ---")
 
-                logger.info(f"--- FHE {model_name} on {dataset_name} (n_bits={n_bits}) ---")
+            profiler = ResourceProfiler(load_config(resource_config))
 
-                profiler = ResourceProfiler(load_config(resource_config))
+            try:
+                model = FHEModel(
+                    model_name,
+                    cfg=models_config,
+                    mode="fhe",
+                    fhe_cfg=fhe_config,
+                )
 
-                try:
-                    model = FHEModel(
-                        model_name,
-                        cfg=models_config,
-                        mode="fhe",
-                        fhe_cfg=fhe_config,
-                    )
+                # ------------------------
+                # Training phase
+                # ------------------------
+                profiler.start_memory_sampling(phase="training")
 
-                    # ------------------------
-                    # Training phase
-                    # ------------------------
-                    profiler.start_memory_sampling(phase="training")
+                with profiler.time_block("data_loading"):
+                    model.load_data(dataset_name, dataset_cfg=datasets_config)
+                    model.split()
 
-                    with profiler.time_block("data_loading"):
-                        model.load_data(dataset_name, dataset_cfg=datasets_config)
-                        model.split()
+                with profiler.time_block("training_fit"):
+                    model.model.fit(model.X_train, model.y_train)
 
-                    with profiler.time_block("training_fit"):
-                        model.model.fit(model.X_train, model.y_train)
+                with profiler.time_block("training_compile"):
+                    model.model.compile(model.X_train)
 
-                    with profiler.time_block("training_compile"):
-                        model.model.compile(model.X_train)
+                model._save_model()
 
-                    model._save_model()
+                profiler.stop_memory_sampling()
 
-                    profiler.stop_memory_sampling()
+                # ------------------------
+                # Inference phase
+                # ------------------------
+                profiler.start_memory_sampling(phase="inference")
 
-                    # ------------------------
-                    # Inference phase
-                    # ------------------------
-                    profiler.start_memory_sampling(phase="inference")
+                import time as _time
+                start = _time.time()
+                metrics = model.evaluate(fhe=fhe_mode)
+                end = _time.time()
 
-                    import time as _time
-                    start = _time.time()
-                    metrics = model.evaluate(fhe=fhe_mode)
-                    end = _time.time()
+                profiler.log_inference(end - start, len(model.X_test))
+                profiler.stop_memory_sampling()
 
-                    profiler.log_inference(end - start, len(model.X_test))
-                    profiler.stop_memory_sampling()
+                fhe_circuit = getattr(model.model, "fhe_circuit", None)
+                complexity  = getattr(fhe_circuit, "complexity", None)
+                profiler.log_fhe(complexity=complexity)
 
-                    fhe_circuit = getattr(model.model, "fhe_circuit", None)
-                    complexity  = getattr(fhe_circuit, "complexity", None)
-                    profiler.log_fhe(complexity=complexity)
+                model_path = f"models/fhe_{n_bits_for_model}__{model_name}__{dataset_name}.json"
+                data_path  = f"data/processed/{dataset_name}.csv"
 
-                    model_path = f"models/fhe_{n_bits}__{model_name}__{dataset_name}.json"
-                    data_path  = f"data/processed/{dataset_name}.csv"
+                profiler.log_storage(model_path=model_path, data_path=data_path)
 
-                    profiler.log_storage(model_path=model_path, data_path=data_path)
+                result_obj = {
+                    "metrics": metrics,
+                    "profiling": profiler.export(),
+                    "n_bits": n_bits_for_model,
+                }
 
-                    result_obj = {
-                        "metrics": metrics,
-                        "profiling": profiler.export(),
-                        "n_bits": n_bits,
-                    }
+                results[dataset_name][model_name] = result_obj
 
-                    run_results[dataset_name][model_name] = result_obj
+                logger.info(
+                    f"[FHE profiling] n_bits={n_bits_for_model} | {dataset_name} | {model_name} "
+                    f"| inference={round(end - start, 4)}s | circuit_complexity={complexity}"
+                )
 
-                    logger.info(
-                        f"[FHE profiling] n_bits={n_bits} | {dataset_name} | {model_name} "
-                        f"| inference={round(end - start, 4)}s | circuit_complexity={complexity}"
-                    )
+                # Save profiling with n_bits included
+                profiler.save(
+                    f"fhe_{n_bits_for_model}__{model_name}__{dataset_name}"
+                )
 
-                    # Save profiling with n_bits included
-                    profiler.save(
-                        f"fhe_{n_bits}__{model_name}__{dataset_name}"
-                    )
+                profiler.reset()
 
-                    profiler.reset()
+            except Exception as e:
+                logger.error(f"Failed: FHE {model_name} on {dataset_name}: {e}")
 
-                except Exception as e:
-                    logger.error(f"Failed: FHE {model_name} on {dataset_name}: {e}")
+                results[dataset_name][model_name] = {
+                    "error": str(e),
+                    "profiling": profiler.export(),
+                    "n_bits": n_bits_for_model,
+                }
 
-                    run_results[dataset_name][model_name] = {
-                        "error": str(e),
-                        "profiling": profiler.export(),
-                        "n_bits": n_bits,
-                    }
-
-                    profiler.reset()
-
-        # store results per n_bits
-        all_results[n_bits] = run_results
+                profiler.reset()
 
     logger.debug("FHE pipeline complete.")
-    return all_results
+    return results

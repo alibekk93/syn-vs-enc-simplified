@@ -1,6 +1,7 @@
 # src/utils.py
 """Utility functions."""
 
+import copy
 import json
 import logging
 import random
@@ -17,6 +18,62 @@ def load_config(config_path: str) -> dict:
         raise FileNotFoundError(f"Config file not found: {path}")
     with open(path) as f:
         return yaml.safe_load(f)
+
+
+# ------------------------------------------------------------------
+# FHE n_bits config helpers (pure config logic, kept dependency-free
+# so callers — e.g. `main.py list-n-bits` — don't need concrete-ml
+# installed just to expand/inject n_bits values).
+# ------------------------------------------------------------------
+
+def expand_n_bits(cfg: dict) -> list:
+    """
+    Returns a list of n_bits values described by an fhe.yaml-style `sweep` block.
+
+    Behavior:
+        - If sweep not defined -> single run ([None])
+        - If list provided     -> return list
+        - If start/end/step    -> expand range
+    """
+    sweep_cfg = cfg.get("sweep", {})
+
+    if not sweep_cfg or not sweep_cfg.get("enabled", False):
+        return [None]
+
+    nb = sweep_cfg.get("n_bits")
+
+    if nb is None:
+        return [None]
+
+    if isinstance(nb, list):
+        return nb
+
+    start = nb.get("start")
+    end   = nb.get("end")
+    step  = nb.get("step", 1)
+
+    if start is None or end is None:
+        return [None]
+
+    return list(range(start, end + 1, step))
+
+
+def inject_n_bits(fhe_cfg: dict, n_bits) -> dict:
+    """Returns a copy of fhe_cfg with n_bits injected into every model config."""
+    if n_bits is None:
+        return fhe_cfg
+
+    new_cfg = copy.deepcopy(fhe_cfg)
+
+    for model_name in new_cfg.get("models", {}):
+        new_cfg["models"][model_name]["n_bits"] = n_bits
+
+    return new_cfg
+
+
+def model_n_bits(fhe_cfg: dict, model_name: str):
+    """Looks up the configured n_bits for a single model."""
+    return fhe_cfg.get("models", {}).get(model_name, {}).get("n_bits")
 
 
 def generate_seeds(seed: int, length: int):

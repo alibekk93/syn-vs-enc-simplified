@@ -1,26 +1,23 @@
 # =============================================================================
-# fhe.yaml — FHE Quantization & Sweep Configuration
+# fhe.yaml — FHE Quantization Configuration
 # =============================================================================
 #
-# Controls quantization parameters and optional parameter sweeps for
-# Fully Homomorphic Encryption (FHE) models using Concrete ML.
+# Controls quantization parameters for FHE models using Concrete ML.
 #
-# OVERVIEW:
-#   - This file now fully controls both:
-#       1. Standard FHE execution
-#       2. Ablation-style experiments (via parameter sweeps)
-#   - The separate ablation pipeline has been removed.
-#
+# Every `pipelines.fhe.run()` call is a single pass: each model trains and
+# evaluates at the n_bits value configured for it below (or the value
+# passed via `run(n_bits=...)` / `python main.py run-experiment --n-bits N`,
+# which overrides every model's n_bits for that run).
 #
 # -----------------------------------------------------------------------------
-# SWEEP (ABSTRACTION OF ABLATION)
+# SWEEP (FOR PARALLEL EXECUTION ONLY)
 # -----------------------------------------------------------------------------
-# Enables iterative runs over multiple n_bits values.
-#
-# If enabled:
-#   - The FHE pipeline will run once per n_bits value.
-#   - Each run is independently trained, evaluated, and profiled.
-#   - Results are saved with n_bits included in filenames.
+# This block is NOT read by `run()`. It's read only by
+# `python main.py list-n-bits`, which expands it into a flat file
+# (one n_bits value per line) for launching one `run-experiment --n-bits N`
+# process per value — in parallel, locally or as separate cluster jobs.
+# Each process is independent and writes uniquely-named output files
+# (n_bits is embedded in every filename), so no aggregation step is needed.
 #
 # Supported formats:
 #
@@ -29,15 +26,6 @@
 #
 #   Explicit list:
 #     n_bits: [2, 3, 4, 6, 8]
-#
-# Behavior:
-#   - If enabled: overrides all model n_bits values
-#   - If disabled: uses per-model n_bits below
-#   - If start == end: only one run is executed
-#
-# Output:
-#   - Metrics → results/metrics/
-#   - Profiling → results/resource_profiles/
 #
 # -----------------------------------------------------------------------------
 
@@ -59,9 +47,8 @@ sweep:
 # -----------------------------------------------------------------------------
 # Per-model FHE quantization configuration.
 #
-# These settings are:
-#   - Used ONLY if sweep.enabled = false
-#   - Otherwise overridden by sweep iteration values
+# These are the n_bits values `run()` always uses, unless overridden
+# wholesale by `run(n_bits=...)` / `--n-bits N` for a given process.
 #
 # Each key corresponds to a model in config/models.yaml
 #
@@ -97,9 +84,10 @@ models:
 #
 # - Only models supported by Concrete ML can be used in FHE mode.
 #
-# - Sweep mode enables systematic exploration of this trade-off.
+# - Run python main.py run-experiment --n-bits N once per value (in
+#   parallel) to explore the accuracy/performance trade-off across n_bits.
 #
-# - All runs (sweep or single) automatically:
+# - Every run automatically:
 #       - compute evaluation metrics
 #       - perform resource profiling (time, memory, storage, FHE complexity)
 #

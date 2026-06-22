@@ -3,7 +3,9 @@ Main entry point with subcommands.
 
 Usage:
     python main.py run-experiment --config config/main.yaml
+    python main.py run-experiment --config config/main.yaml --n-bits 4
     python main.py run-single-bootstrap --config config/main.yaml --seed 42
+    python main.py list-n-bits
     python main.py create-visuals
 """
 
@@ -59,7 +61,7 @@ def set_seed(seed: int):
 # Commands
 # --------------------------------------------------
 
-def run_experiment(config_path: str):
+def run_experiment(config_path: str, n_bits: int | None = None):
     check_torch()
 
     cfg          = load_config(config_path)
@@ -92,7 +94,8 @@ def run_experiment(config_path: str):
         fhe.run(
             datasets=datasets,
             models=models,
-            fhe_mode=fhe_mode
+            fhe_mode=fhe_mode,
+            n_bits=n_bits,
         )
 
     logger.info("=== Experiment complete ===")
@@ -149,6 +152,20 @@ def generate_seeds(seed: int, length: int):
             f.write(f"{s}\n")
     logger.info(f"Generated {length} seeds and saved to bootstrap_seeds.txt")
 
+
+def list_n_bits(config_path: str, out_path: str):
+    """Expand the configured n_bits sweep and save to a flat file (one value per line)."""
+    from src.utils import expand_n_bits
+
+    cfg = load_config(config_path)
+    values = [v for v in expand_n_bits(cfg) if v is not None]
+
+    with open(out_path, "w") as f:
+        for v in values:
+            f.write(f"{v}\n")
+
+    logger.info(f"Wrote {len(values)} n_bits values to {out_path}")
+
 # --------------------------------------------------
 # CLI
 # --------------------------------------------------
@@ -166,6 +183,13 @@ if __name__ == "__main__":
         "--config",
         default="config/main.yaml",
         help="Path to master config"
+    )
+    run_parser.add_argument(
+        "--n-bits",
+        type=int,
+        default=None,
+        help="Override n_bits for every FHE model (default: per-model values in config/fhe.yaml). "
+             "Run once per value, in parallel, to sweep n_bits — see list-n-bits."
     )
 
     # ---- run-single-bootstrap ----
@@ -225,10 +249,26 @@ if __name__ == "__main__":
         help="Number of seeds to generate (default: 1000)"
     )
 
+    # ---- list-n-bits ----
+    n_bits_parser = subparsers.add_parser(
+        "list-n-bits",
+        help="Expand the configured n_bits sweep to a flat file (one value per line)"
+    )
+    n_bits_parser.add_argument(
+        "--config",
+        default="config/fhe.yaml",
+        help="Path to FHE config (default: config/fhe.yaml)"
+    )
+    n_bits_parser.add_argument(
+        "--out",
+        default="fhe_n_bits.txt",
+        help="Path to write the n_bits list (default: fhe_n_bits.txt)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "run-experiment":
-        run_experiment(args.config)
+        run_experiment(args.config, args.n_bits)
 
     elif args.command == "run-single-bootstrap":
         run_single_bootstrap(args.config, args.seed)
@@ -241,3 +281,6 @@ if __name__ == "__main__":
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)
+
+    elif args.command == "list-n-bits":
+        list_n_bits(args.config, args.out)

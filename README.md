@@ -1,5 +1,21 @@
 # syn-vs-enc-simplified
 
+## Usage
+
+```
+python main.py run-experiment --config config/main.yaml
+python main.py run-experiment --config config/experiments/DRAC-fhe.yaml --n-bits 4
+python main.py list-n-bits                                  # expand config/fhe.yaml's sweep -> fhe_n_bits.txt
+python main.py run-single-bootstrap --config config/main.yaml --seed 42
+python main.py generate-seeds --length 1000                 # -> bootstrap_seeds.txt
+python main.py aggregate-bootstrap
+```
+
+To parallelize the FHE n_bits sweep, run `list-n-bits` then launch one
+`run-experiment --n-bits N` process per value (locally, or as separate
+cluster jobs) — each is independent and writes uniquely-named output files,
+mirroring how bootstrap parallelizes across seeds via `run-single-bootstrap`.
+
 ## TD
 ### visualizations
 - mode combination legend
