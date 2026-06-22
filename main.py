@@ -109,6 +109,7 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
     cfg           = load_config(config_path)
     datasets      = cfg.get("datasets")
     models        = cfg.get("models")
+    synthesizers  = cfg.get("synthesizers")
     fhe_mode      = cfg.get("fhe_mode", "simulate")
     pipelines_cfg = cfg.get("pipelines", {})
 
@@ -121,6 +122,7 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
     bootstrap.run(
         datasets=datasets,
         models=models,
+        synthesizers=synthesizers,
         seed=seed,
         fhe_mode=fhe_mode,
         n_bits=n_bits,

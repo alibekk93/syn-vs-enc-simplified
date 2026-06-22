@@ -96,6 +96,7 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
 def run(
     datasets: list[str] | None = None,
     models: list[str] | None = None,
+    synthesizers: list[str] | None = None,
     seed: int = 42,
     evaluation: dict | None = None,
     fhe_mode: str = "simulate",
@@ -122,6 +123,8 @@ def run(
     Args:
         datasets: List of dataset names to process. If None, all datasets are processed.
         models:   List of model names to use. If None, all models from config are used.
+        synthesizers: List of synthesizer names to use. If None, all synthesizers
+            from config are used.
         seed:     Random seed for bootstrap sampling.
         evaluation: Optional evaluation configuration (not currently used).
         n_bits: Override n_bits for every FHE model (passed straight through to
@@ -214,6 +217,7 @@ def run(
                 from pipelines import synthetic
                 synth_results = synthetic.run(
                     datasets=[dataset_name],
+                    synthesizers=synthesizers,
                     models=targets_models,
                     device=device,
                     datasets_config=str(configs["datasets"]),

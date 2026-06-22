@@ -6,3 +6,4 @@ xgboost
 synthcity
 seaborn
 matplotlib
+psutil

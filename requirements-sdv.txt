@@ -6,3 +6,4 @@ xgboost
 sdv
 seaborn
 matplotlib
+psutil

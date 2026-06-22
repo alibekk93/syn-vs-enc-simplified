@@ -11,3 +11,4 @@ concrete-ml
 #   pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python
 seaborn
 matplotlib
+psutil
