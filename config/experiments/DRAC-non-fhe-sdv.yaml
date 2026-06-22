@@ -1,10 +1,15 @@
 # =============================================================================
-# DRAC.yaml — Master Pipeline Configuration for DRAC testing
+# DRAC-non-fhe-sdv.yaml — Master Pipeline Configuration for DRAC testing (SDV)
 # =============================================================================
 #
 # Controls which pipelines run and what they operate on.
 #
-# DATASETS / MODELS / SYNTHESIZERS:
+# Runs only sdv-backed synthesizers (gaussian_copula, ctgan). Intended for
+# the DRAC venv that has sdv installed but not synthcity — pair with
+# DRAC-non-fhe-synthcity.yaml run in the synthcity venv to reproduce a full
+# DRAC-non-fhe.yaml-equivalent run split across both envs.
+#
+# DATASETS / MODELS:
 #   Set to null to run all entries from their respective configs,
 #   or provide a list to run a subset, e.g.:
 #     datasets: [heart_disease, diabetes]
@@ -16,9 +21,9 @@
 #
 # =============================================================================
 
-datasets:     [heart_disease, diabetes, breast_cancer]
+datasets:     null
 models:       null
-synthesizers: null
+synthesizers: [gaussian_copula, ctgan]
 fhe_mode:     disable
 
 pipelines:
