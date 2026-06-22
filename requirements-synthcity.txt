@@ -1,0 +1,8 @@
+pandas
+numpy
+scikit-learn
+PyYAML
+xgboost
+synthcity
+seaborn
+matplotlib
