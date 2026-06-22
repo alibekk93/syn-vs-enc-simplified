@@ -29,10 +29,36 @@ mirroring how bootstrap parallelizes across seeds via `run-single-bootstrap`.
 
 ### synthesizers
 - % oversampling (e.g. 100 is same as original)
-- separate fhe from standard / synth pipelines for DRAC
+
+### bugs
+- ctgan: `Training failed: logistic_regression on ctgan__heart_disease: [Errno 2] No such file or directory: 'data/processed/ctgan__heart_disease.csv'`
+- synthcity:
+```
+2026-06-22 11:11:04,827 [INFO]   SYNTHETIC: bayesian_network  |  device: cuda
+2026-06-22 11:11:04,827 [INFO] ============================================================
+2026-06-22 11:11:04,827 [INFO] --- Synthesizing: bayesian_network on heart_disease ---
+2026-06-22 11:11:04,840 [INFO] [bayesian_network] device='cuda' requested but 'bayesian_network' has no GPU support — running on CPU
+[transformers] Disabling PyTorch because PyTorch >= 2.4 is required but found 2.2.1+computecanada
+[transformers] PyTorch was not found. Models won't be available and only tokenizers, configuration and file/data utilities can be used.
+2026-06-22 11:11:14,515 [ERROR] Synthesis failed: bayesian_network on heart_disease: module 'torch.nn' has no attribute 'RMSNorm'
+2026-06-22 11:11:14,544 [INFO] ============================================================
+2026-06-22 11:11:14,544 [INFO]   SYNTHETIC: nflow  |  device: cuda
+2026-06-22 11:11:14,544 [INFO] ============================================================
+2026-06-22 11:11:14,544 [INFO] --- Synthesizing: nflow on heart_disease ---
+2026-06-22 11:11:14,563 [ERROR] Synthesis failed: nflow on heart_disease: module 'torch.nn' has no attribute 'RMSNorm'
+2026-06-22 11:11:14,648 [INFO] ============================================================
+2026-06-22 11:11:14,648 [INFO]   SYNTHETIC: arf  |  device: cuda
+2026-06-22 11:11:14,648 [INFO] ============================================================
+2026-06-22 11:11:14,648 [INFO] --- Synthesizing: arf on heart_disease ---
+2026-06-22 11:11:14,671 [ERROR] Synthesis failed: arf on heart_disease: module 'torch.nn' has no attribute 'RMSNorm'
+2026-06-22 11:11:14,753 [INFO] Completed bootstrap iteration for heart_disease with seed 2746317213
+```
+- fhe
+```
+2026-06-22 11:12:37,522 [ERROR] Failed running experiment pipeline on bootstrap sample for pregnancy_outcome: device='cuda' requested, but this concrete-python build has no GPU support. Install the GPU build with: pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python
+```
 
 ### methodology
-- bug: inference time FHE n_bits 2
 - bootstrap pre inference: identify a name and research past examples, draft justificationgit a
 - resource metrics
 - MIMIC dataset?
