@@ -12,49 +12,83 @@ import warnings
 # silence it before anything below has a chance to trigger that import.
 logging.getLogger("transformers").setLevel(logging.ERROR)
 
-# bayesian_network's pgmpy structure search reports MI-score warnings from
-# joblib worker processes, which a local catch_warnings() can't reach.
-# Filter UserWarning process-wide — current process via filterwarnings(),
-# and any joblib workers spawned in a fresh interpreter via PYTHONWARNINGS.
-os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
-warnings.filterwarnings("ignore", category=UserWarning)
-
 import pandas as pd
 from pathlib import Path
 from typing import Optional, Union
 
-from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
-from sdv.metadata import Metadata
 from sklearn.model_selection import train_test_split
 
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
-for _lib in ("sdv", "rdt", "copulas"):
-    logging.getLogger(_lib).setLevel(logging.WARNING)
 
-# Importing/initializing synthcity transitively imports pykeops and compiles
-# its JIT binder, which prints "[KeOps] Compiling ... OK" straight to stdout.
-# That's a one-time, harmless build step — swallow it rather than surface it.
-with contextlib.redirect_stdout(io.StringIO()):
-    import synthcity.logger as synthcity_log
-    from synthcity.plugins import Plugins
-    from synthcity.utils.serialization import save_to_file, load_from_file
+# sdv and synthcity are heavy, mutually-independent optional dependencies
+# (experiments run them in separate venvs). Each is imported lazily, only
+# once a synthesizer actually backed by that library is fit/saved/loaded,
+# so an environment with only one of the two libraries installed never
+# needs the other to even import this module.
+_SDV = None
+_SYNTHCITY = None
 
-    # synthcity logs through loguru (not stdlib logging) and adds its own
-    # CRITICAL stderr sink on import — drop it, we log via `logger` instead.
-    synthcity_log.remove()
 
-    # Plugins() re-scans every plugin file (including ones with unmet
-    # optional deps, e.g. goggle) on each instantiation — build it once.
-    _SYNTHCITY_PLUGINS = Plugins()
+def _load_sdv() -> dict:
+    """Lazily import sdv and cache its constructor classes."""
+    global _SDV
+    if _SDV is None:
+        from sdv.single_table import GaussianCopulaSynthesizer, CTGANSynthesizer
+        from sdv.metadata import Metadata
 
-# SDV synthesizers need their constructor class; synthcity synthesizers are
-# created by name through Plugins().get(name, **params).
-SDV_SYNTHESIZER_CLASSES = {
-    "gaussian_copula": GaussianCopulaSynthesizer,
-    "ctgan": CTGANSynthesizer,
-}
+        for _lib in ("sdv", "rdt", "copulas"):
+            logging.getLogger(_lib).setLevel(logging.WARNING)
+
+        _SDV = {
+            "classes": {
+                "gaussian_copula": GaussianCopulaSynthesizer,
+                "ctgan": CTGANSynthesizer,
+            },
+            "Metadata": Metadata,
+        }
+    return _SDV
+
+
+def _load_synthcity() -> dict:
+    """Lazily import synthcity and cache its shared Plugins() registry."""
+    global _SYNTHCITY
+    if _SYNTHCITY is None:
+        # bayesian_network's pgmpy structure search reports MI-score warnings
+        # from joblib worker processes, which a local catch_warnings() can't
+        # reach. Filter UserWarning process-wide — current process via
+        # filterwarnings(), and any joblib workers spawned in a fresh
+        # interpreter via PYTHONWARNINGS.
+        os.environ.setdefault("PYTHONWARNINGS", "ignore::UserWarning")
+        warnings.filterwarnings("ignore", category=UserWarning)
+
+        # Importing/initializing synthcity transitively imports pykeops and
+        # compiles its JIT binder, which prints "[KeOps] Compiling ... OK"
+        # straight to stdout. That's a one-time, harmless build step —
+        # swallow it rather than surface it.
+        with contextlib.redirect_stdout(io.StringIO()):
+            import synthcity.logger as synthcity_log
+            from synthcity.plugins import Plugins
+            from synthcity.utils.serialization import save_to_file, load_from_file
+
+            # synthcity logs through loguru (not stdlib logging) and adds
+            # its own CRITICAL stderr sink on import — drop it, we log via
+            # `logger` instead.
+            synthcity_log.remove()
+
+            # Plugins() re-scans every plugin file (including ones with
+            # unmet optional deps, e.g. goggle) on each instantiation —
+            # build it once.
+            plugins = Plugins()
+
+        _SYNTHCITY = {
+            "plugins": plugins,
+            "save_to_file": save_to_file,
+            "load_from_file": load_from_file,
+        }
+    return _SYNTHCITY
+
 
 # Maps synthesizer name -> backing library ("sdv" or "synthcity").
 SUPPORTED_SYNTHESIZERS = {
@@ -196,15 +230,17 @@ class Synthesizer:
         params = self.synth_cfg.get("parameters") or {}
 
         if self.library == "sdv":
-            metadata = Metadata.detect_from_dataframe(self.df)
+            sdv = _load_sdv()
+            metadata = sdv["Metadata"].detect_from_dataframe(self.df)
             logger.debug(f"[{self.name}] Metadata detected for {len(self.df.columns)} columns")
 
             if not params.get("numerical_distributions"):
                 params.pop("numerical_distributions", None)
 
-            self.synthesizer = SDV_SYNTHESIZER_CLASSES[self.method](metadata, **params)
+            self.synthesizer = sdv["classes"][self.method](metadata, **params)
         else:
-            self.synthesizer = _SYNTHCITY_PLUGINS.get(
+            synthcity = _load_synthcity()
+            self.synthesizer = synthcity["plugins"].get(
                 self.method,
                 workspace=self.synthesizers_dir / ".synthcity_workspace",
                 **params,
@@ -254,7 +290,8 @@ class Synthesizer:
             self.synthesizer._n_rows_original = self.n_rows_original
             self.synthesizer.save(str(path))
         else:
-            save_to_file(
+            synthcity = _load_synthcity()
+            synthcity["save_to_file"](
                 path,
                 {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original},
             )
@@ -279,10 +316,12 @@ class Synthesizer:
         instance.dataset_name     = stem[1] if len(stem) > 1 else None
 
         if instance.library == "sdv":
-            instance.synthesizer     = SDV_SYNTHESIZER_CLASSES[name].load(str(path))
+            sdv = _load_sdv()
+            instance.synthesizer     = sdv["classes"][name].load(str(path))
             instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
         else:
-            payload = load_from_file(path)
+            synthcity = _load_synthcity()
+            payload = synthcity["load_from_file"](path)
             instance.synthesizer     = payload["synthesizer"]
             instance.n_rows_original = payload["n_rows_original"]
 
