@@ -2,7 +2,7 @@
 
 import logging
 import time
-from src.utils import load_config
+from src.utils import load_config, require_device
 from src.models import Model
 from src.resource_profiling import ResourceProfiler
 
@@ -22,11 +22,21 @@ def _log_section(title: str) -> None:
     logger.info(bar)
 
 
-def run(datasets: list[str] | None = None, models: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml", models_config: str = "config/models.yaml") -> dict:
+def run(
+    datasets: list[str] | None = None,
+    models: list[str] | None = None,
+    device: str | None = None,
+    datasets_config: str = "config/datasets.yaml",
+    resource_config: str = "config/resource_profiling.yaml",
+    models_config: str = "config/models.yaml",
+) -> dict:
     """
     Args:
         datasets: List of dataset names (default: all).
         models:   List of model names (default: all in config).
+        device: "cpu" or "cuda" (default: models.yaml's `device`). Only
+            xgboost has a GPU path — other model types ignore it. Checked
+            eagerly so a bad "cuda" request fails before any training happens.
         datasets_config: Path to datasets configuration file.
         resource_config: Path to resource profiling configuration file.
         models_config: Path to models configuration file.
@@ -37,9 +47,12 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None, data
     targets_datasets = datasets or list(load_config(datasets_config).keys())
     targets_models   = models   or [m["name"] for m in load_config(models_config).get("models", [])]
 
-    logger.debug(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}")
+    active_device = device or load_config(models_config).get("device", "cpu")
+    require_device(active_device)
 
-    _log_section("STANDARD")
+    logger.debug(f"Standard pipeline started — datasets: {targets_datasets}, models: {targets_models}, device: {active_device}")
+
+    _log_section(f"STANDARD  |  device: {active_device}")
 
     results = {}
     for dataset_name in targets_datasets:
@@ -50,7 +63,7 @@ def run(datasets: list[str] | None = None, models: list[str] | None = None, data
             profiler = ResourceProfiler(load_config(resource_config))
 
             try:
-                model = Model(model_name, cfg=models_config, mode="standard")
+                model = Model(model_name, cfg=models_config, mode="standard", device=active_device)
 
                 # Explicit phase labels so training and inference
                 # memory snapshots are stored separately.

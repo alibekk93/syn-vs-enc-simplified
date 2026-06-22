@@ -76,6 +76,32 @@ def model_n_bits(fhe_cfg: dict, model_name: str):
     return fhe_cfg.get("models", {}).get(model_name, {}).get("n_bits")
 
 
+# ------------------------------------------------------------------
+# Device (GPU) helpers shared by the standard/synthetic pipelines.
+# FHE's device check lives in pipelines/fhe.py since it's concrete-ml
+# specific (checks the compiler, not torch/CUDA).
+# ------------------------------------------------------------------
+
+def check_cuda_available() -> bool:
+    """Whether a CUDA-capable GPU is visible to this process via PyTorch."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
+def require_device(device: str) -> None:
+    """Fails fast if `device='cuda'` is requested but unavailable, instead of
+    failing deep inside a model/synthesizer's fit call (wasting a GPU job
+    allocation)."""
+    if device == "cuda" and not check_cuda_available():
+        raise RuntimeError(
+            "device='cuda' requested, but no CUDA-capable GPU is visible to this "
+            "process (or PyTorch isn't installed with CUDA support)."
+        )
+
+
 def generate_seeds(seed: int, length: int):
     """Generate a list of random seeds and save to file."""
     random.seed(seed)

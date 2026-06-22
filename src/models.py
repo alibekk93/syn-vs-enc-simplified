@@ -46,6 +46,11 @@ SUPPORTED_MODELS = {
                            }),
 }
 
+# Of SUPPORTED_MODELS, only xgboost has a GPU path (`device="cuda"`).
+# logistic_regression/random_forest/svm/mlp are plain scikit-learn — CPU-only,
+# no GPU acceleration exists for them.
+GPU_CAPABLE_MODELS = {"xgboost"}
+
 SUPPORTED_METRICS = {
     "accuracy":  lambda y, yp, yprob: accuracy_score(y, yp),
     "precision": lambda y, yp, yprob: precision_score(y, yp, zero_division=0),
@@ -73,12 +78,15 @@ class Model:
 
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str = "config/models.yaml", mode: str = "standard"):
+    def __init__(self, name: str, cfg: str = "config/models.yaml", mode: str = "standard", device: str | None = None):
         """
         Args:
-            name: Model name — must be a key in SUPPORTED_MODELS
-            cfg:  Path to models.yaml
-            mode: Mode of operation — 'standard', 'synthesized', etc. Used for saving.
+            name:   Model name — must be a key in SUPPORTED_MODELS
+            cfg:    Path to models.yaml
+            mode:   Mode of operation — 'standard', 'synthesized', etc. Used for saving.
+            device: "cpu" or "cuda" (default: models.yaml's `device`, normally cpu).
+                    Only applied for GPU_CAPABLE_MODELS (currently xgboost) —
+                    other model types have no GPU path and ignore it.
         """
         all_cfg    = load_config(cfg)
         model_cfgs = {m["name"]: m for m in all_cfg.get("models", [])}
@@ -92,12 +100,18 @@ class Model:
         self.cfg       = all_cfg
         self.model_cfg = model_cfgs[name]
         self.mode      = mode
+        self.device    = device or all_cfg.get("device", "cpu")
 
         output_cfg       = all_cfg.get("output", {})
         self.results_dir = Path(output_cfg.get("results_dir", "results"))
         self.models_dir  = Path(output_cfg.get("models_dir", "models"))
 
         hyperparams = self.model_cfg.get("hyperparameters") or {}
+        if self.device == "cuda":
+            if name in GPU_CAPABLE_MODELS:
+                hyperparams = {**hyperparams, "device": "cuda"}
+            else:
+                logger.info(f"[{name}] device='cuda' requested but this model has no GPU support — running on CPU")
         self.model  = SUPPORTED_MODELS[name](hyperparams)
 
         # Data placeholders

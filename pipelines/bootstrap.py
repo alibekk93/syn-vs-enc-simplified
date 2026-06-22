@@ -99,6 +99,8 @@ def run(
     seed: int = 42,
     evaluation: dict | None = None,
     fhe_mode: str = "simulate",
+    n_bits: int | None = None,
+    device: str | None = None,
     pipelines_cfg: dict | None = None,
 ) -> dict:
     """
@@ -122,6 +124,15 @@ def run(
         models:   List of model names to use. If None, all models from config are used.
         seed:     Random seed for bootstrap sampling.
         evaluation: Optional evaluation configuration (not currently used).
+        n_bits: Override n_bits for every FHE model (passed straight through to
+            `fhe.run`). Lets the FHE stage of a given seed be parallelized across
+            n_bits values as separate processes — see `main.py`'s
+            `run-single-bootstrap --n-bits N` and `list-n-bits`.
+        device: Override the compute device ("cpu" or "cuda"), passed straight
+            through to `standard.run`, `synthetic.run`, and `fhe.run`. Each
+            pipeline applies it only to the models/synthesizers that actually
+            have a GPU path. See the `device` key in config/models.yaml,
+            config/synthesizers.yaml, and config/fhe.yaml.
         pipelines_cfg: Which stages to run, e.g. {"preprocessing": True, "raw": True,
             "synthetic": True, "fhe": True}. Stages are imported lazily so a stage's
             heavy dependencies (e.g. concrete.ml for fhe, sdv/synthcity for synthetic)
@@ -192,6 +203,7 @@ def run(
                 std_results = standard.run(
                     datasets=[dataset_name],
                     models=targets_models,
+                    device=device,
                     datasets_config=str(configs["datasets"]),
                     resource_config=str(configs["resource"]),
                     models_config=str(configs["models"])
@@ -203,6 +215,7 @@ def run(
                 synth_results = synthetic.run(
                     datasets=[dataset_name],
                     models=targets_models,
+                    device=device,
                     datasets_config=str(configs["datasets"]),
                     resource_config=str(configs["resource"]),
                     models_config=str(configs["models"]),
@@ -219,6 +232,8 @@ def run(
                     resource_config=str(configs["resource"]),
                     models_config=str(configs["models"]),
                     fhe_mode=fhe_mode,
+                    n_bits=n_bits,
+                    device=device,
                 )
 
             # Collect results

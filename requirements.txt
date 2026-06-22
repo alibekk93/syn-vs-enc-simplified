@@ -4,7 +4,10 @@ scikit-learn
 PyYAML
 xgboost
 sdv
-synthcity
 concrete-ml
+# For the FHE venv (.venv-fhe), after `pip install concrete-ml`, swap in the
+# GPU-enabled compiler to use config/fhe.yaml's `device: cuda`:
+#   pip uninstall concrete-python
+#   pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python
 seaborn
 matplotlib

@@ -61,7 +61,7 @@ def set_seed(seed: int):
 # Commands
 # --------------------------------------------------
 
-def run_experiment(config_path: str, n_bits: int | None = None):
+def run_experiment(config_path: str, n_bits: int | None = None, device: str | None = None):
     check_torch()
 
     cfg          = load_config(config_path)
@@ -81,12 +81,12 @@ def run_experiment(config_path: str, n_bits: int | None = None):
     if pipelines_cfg.get("raw"):
         logger.info("=== Raw ===")
         from pipelines import standard
-        standard.run(datasets=datasets, models=models)
+        standard.run(datasets=datasets, models=models, device=device)
 
     if pipelines_cfg.get("synthetic"):
         logger.info("=== Synthetic ===")
         from pipelines import synthetic
-        synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models)
+        synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models, device=device)
 
     if pipelines_cfg.get("fhe"):
         logger.info("=== FHE ===")
@@ -96,12 +96,13 @@ def run_experiment(config_path: str, n_bits: int | None = None):
             models=models,
             fhe_mode=fhe_mode,
             n_bits=n_bits,
+            device=device,
         )
 
     logger.info("=== Experiment complete ===")
 
 
-def run_single_bootstrap(config_path: str, seed: int):
+def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None, device: str | None = None):
     check_torch()
     set_seed(seed)
 
@@ -122,6 +123,8 @@ def run_single_bootstrap(config_path: str, seed: int):
         models=models,
         seed=seed,
         fhe_mode=fhe_mode,
+        n_bits=n_bits,
+        device=device,
         pipelines_cfg=pipelines_cfg,
     )
 
@@ -191,6 +194,16 @@ if __name__ == "__main__":
         help="Override n_bits for every FHE model (default: per-model values in config/fhe.yaml). "
              "Run once per value, in parallel, to sweep n_bits — see list-n-bits."
     )
+    run_parser.add_argument(
+        "--device",
+        choices=["cpu", "cuda"],
+        default=None,
+        help="Override the compute device for FHE/standard/synthetic stages (default: each "
+             "stage's own config `device`, normally cpu). Only GPU-capable models/synthesizers "
+             "use it (xgboost; ctgan/nflow/arf; all FHE models) — others ignore it. FHE's cuda "
+             "needs the GPU build of concrete-python; standard/synthetic's cuda needs a "
+             "CUDA-enabled PyTorch install."
+    )
 
     # ---- run-single-bootstrap ----
     bootstrap_parser = subparsers.add_parser(
@@ -207,6 +220,23 @@ if __name__ == "__main__":
         type=int,
         default=42,
         help="Random seed (default: 42)"
+    )
+    bootstrap_parser.add_argument(
+        "--n-bits",
+        type=int,
+        default=None,
+        help="Override n_bits for every FHE model (default: per-model values in config/fhe.yaml). "
+             "Run once per (seed, n_bits) pair, in parallel, to sweep n_bits within bootstrap."
+    )
+    bootstrap_parser.add_argument(
+        "--device",
+        choices=["cpu", "cuda"],
+        default=None,
+        help="Override the compute device for FHE/standard/synthetic stages (default: each "
+             "stage's own config `device`, normally cpu). Only GPU-capable models/synthesizers "
+             "use it (xgboost; ctgan/nflow/arf; all FHE models) — others ignore it. FHE's cuda "
+             "needs the GPU build of concrete-python; standard/synthetic's cuda needs a "
+             "CUDA-enabled PyTorch install."
     )
 
     # ---- create-visuals ----
@@ -268,10 +298,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.command == "run-experiment":
-        run_experiment(args.config, args.n_bits)
+        run_experiment(args.config, args.n_bits, args.device)
 
     elif args.command == "run-single-bootstrap":
-        run_single_bootstrap(args.config, args.seed)
+        run_single_bootstrap(args.config, args.seed, args.n_bits, args.device)
 
     elif args.command == "create-visuals":
         create_visuals()

@@ -99,6 +99,12 @@ SUPPORTED_SYNTHESIZERS = {
     "arf": "synthcity",
 }
 
+# Of SUPPORTED_SYNTHESIZERS, only these are torch-backed neural models with a
+# real GPU path. gaussian_copula is a statistical model (sdv) and
+# bayesian_network is pgmpy structure search (synthcity) — both CPU-only,
+# no GPU acceleration exists for them.
+GPU_CAPABLE_SYNTHESIZERS = {"ctgan", "nflow", "arf"}
+
 
 class Synthesizer:
     """
@@ -122,11 +128,15 @@ class Synthesizer:
 
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str = "config/synthesizers.yaml"):
+    def __init__(self, name: str, cfg: str = "config/synthesizers.yaml", device: str | None = None):
         """
         Args:
-            name: Synthesizer name — must be a key in config and SUPPORTED_SYNTHESIZERS
-            cfg:  Path to synthesizers.yaml
+            name:   Synthesizer name — must be a key in config and SUPPORTED_SYNTHESIZERS
+            cfg:    Path to synthesizers.yaml
+            device: "cpu" or "cuda" (default: synthesizers.yaml's `device`, normally
+                    cpu). Only applied for GPU_CAPABLE_SYNTHESIZERS (ctgan, nflow,
+                    arf) — gaussian_copula and bayesian_network have no GPU path
+                    and ignore it.
         """
         all_cfg = load_config(cfg)
         output_cfg             = all_cfg.get("output", {})
@@ -149,6 +159,7 @@ class Synthesizer:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")
 
         self.library           = SUPPORTED_SYNTHESIZERS[self.method]
+        self.device            = device or all_cfg.get("device", "cpu")
 
         self.synthetic_dir    = Path(output_cfg.get("synthetic_dir", "data/synthetic"))
         self.synthesizers_dir = Path(output_cfg.get("synthesizers_dir", "synthesizers"))
@@ -227,7 +238,12 @@ class Synthesizer:
         if self.df is None:
             raise RuntimeError("Call load_data() before fit()")
 
-        params = self.synth_cfg.get("parameters") or {}
+        params = dict(self.synth_cfg.get("parameters") or {})
+
+        gpu_requested = self.device == "cuda"
+        gpu_capable   = self.method in GPU_CAPABLE_SYNTHESIZERS
+        if gpu_requested and not gpu_capable:
+            logger.info(f"[{self.name}] device='cuda' requested but '{self.method}' has no GPU support — running on CPU")
 
         if self.library == "sdv":
             sdv = _load_sdv()
@@ -237,8 +253,14 @@ class Synthesizer:
             if not params.get("numerical_distributions"):
                 params.pop("numerical_distributions", None)
 
+            if self.method == "ctgan":
+                params["enable_gpu"] = gpu_requested
+
             self.synthesizer = sdv["classes"][self.method](metadata, **params)
         else:
+            if gpu_requested and gpu_capable:
+                params["device"] = "cuda"
+
             synthcity = _load_synthcity()
             self.synthesizer = synthcity["plugins"].get(
                 self.method,

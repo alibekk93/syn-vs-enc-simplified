@@ -43,6 +43,29 @@ sweep:
 
 
 # -----------------------------------------------------------------------------
+# DEVICE
+# -----------------------------------------------------------------------------
+# Compilation target for Concrete ML's `.compile()` call. "cpu" works
+# anywhere. "cuda" requires:
+#   1. A CUDA-enabled GPU, visible to the process.
+#   2. The GPU build of concrete-python:
+#        pip uninstall concrete-python
+#        pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python
+#
+# A model compiled with device="cuda" cannot run on a non-GPU machine, so
+# leave this as "cpu" for local/dev work. Override per-run with
+# `run(device=...)` / `--device cuda` (see `main.py run-experiment` and
+# `run-single-bootstrap`) rather than editing this default, so the same
+# config still works for quick local testing.
+#
+# Startup fails fast with a clear error if "cuda" is requested but
+# unavailable, rather than failing deep inside `.compile()`.
+# -----------------------------------------------------------------------------
+
+device: cpu
+
+
+# -----------------------------------------------------------------------------
 # MODELS
 # -----------------------------------------------------------------------------
 # Per-model FHE quantization configuration.

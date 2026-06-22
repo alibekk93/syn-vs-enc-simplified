@@ -162,7 +162,7 @@ class FHEModel:
             raise RuntimeError("Call split() before train()")
 
         self.model.fit(self.X_train, self.y_train)
-        self.model.compile(self.X_train)
+        self.model.compile(self.X_train, device=self.fhe_cfg.get("device", "cpu"))
         self._save_model()
 
     def predict(self, X: np.ndarray, fhe: str = "simulate") -> np.ndarray:
@@ -205,7 +205,7 @@ class FHEModel:
     def compile(self) -> None:
         if self.X_train is None:
             raise RuntimeError("Need training data")
-        self.model.compile(self.X_train)
+        self.model.compile(self.X_train, device=self.fhe_cfg.get("device", "cpu"))
 
     # ------------------------------------------------------------------
     # Internal

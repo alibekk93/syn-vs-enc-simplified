@@ -2,7 +2,7 @@
 
 import logging
 import time
-from src.utils import load_config
+from src.utils import load_config, require_device
 from src.synthesizers import Synthesizer
 from src.models import Model
 from src.resource_profiling import ResourceProfiler
@@ -29,6 +29,7 @@ def run(
     synthesizers:  list[str] | None = None,
     models:        list[str] | None = None,
     skip_training: bool = False,
+    device: str | None = None,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
     models_config: str = "config/models.yaml",
@@ -40,6 +41,11 @@ def run(
         synthesizers:  List of synthesizer names (default: all in config).
         models:        List of model names (default: all in config).
         skip_training: If True, only synthesize data without training models.
+        device: "cpu" or "cuda" (default: synthesizers.yaml's `device`). Used
+            for both synthesis (ctgan/nflow/arf only) and the downstream
+            model training (xgboost only) — other synthesizers/models ignore
+            it. Checked eagerly so a bad "cuda" request fails before any
+            work happens.
         datasets_config: Path to datasets configuration file.
         resource_config: Path to resource profiling configuration file.
         models_config: Path to models configuration file.
@@ -52,14 +58,17 @@ def run(
     targets_synthesizers = synthesizers or [k for k in load_config(synthesizers_config).get("methods", [])]
     targets_models       = models       or [m["name"] for m in load_config(models_config).get("models", [])]
 
+    active_device = device or load_config(synthesizers_config).get("device", "cpu")
+    require_device(active_device)
+
     logger.debug(
         f"Synthetic pipeline started — datasets: {targets_datasets}, "
-        f"synthesizers: {targets_synthesizers}, models: {targets_models}"
+        f"synthesizers: {targets_synthesizers}, models: {targets_models}, device: {active_device}"
     )
 
     results = {}
     for synth_name in targets_synthesizers:
-        _log_section(f"SYNTHETIC: {synth_name}")
+        _log_section(f"SYNTHETIC: {synth_name}  |  device: {active_device}")
 
         for dataset_name in targets_datasets:
             results.setdefault(dataset_name, {})
@@ -71,7 +80,7 @@ def run(
             synth_profiler = ResourceProfiler(load_config(resource_config))
 
             try:
-                synth = Synthesizer(synth_name, cfg=synthesizers_config)
+                synth = Synthesizer(synth_name, cfg=synthesizers_config, device=active_device)
 
                 # Explicit phase label.
                 synth_profiler.start_memory_sampling(phase="synthesis")
@@ -101,7 +110,7 @@ def run(
                     train_profiler = ResourceProfiler(load_config(resource_config))
 
                     try:
-                        model = Model(model_name, cfg=models_config, mode=synth_name)
+                        model = Model(model_name, cfg=models_config, mode=synth_name, device=active_device)
 
                         # Explicit phase labels.
                         train_profiler.start_memory_sampling(phase="training")

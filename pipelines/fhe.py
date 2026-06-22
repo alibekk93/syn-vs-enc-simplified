@@ -22,6 +22,26 @@ def _log_section(title: str) -> None:
     logger.info(bar)
 
 
+def _check_device(device: str) -> None:
+    """Fails fast if `device='cuda'` is requested but unavailable, instead of
+    failing deep inside `.compile()` (wasting a GPU job allocation)."""
+    if device != "cuda":
+        return
+
+    import concrete.compiler
+
+    if not concrete.compiler.check_gpu_enabled():
+        raise RuntimeError(
+            "device='cuda' requested, but this concrete-python build has no GPU support. "
+            "Install the GPU build with: "
+            "pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python"
+        )
+    if not concrete.compiler.check_gpu_available():
+        raise RuntimeError(
+            "device='cuda' requested, but no GPU is available to this process."
+        )
+
+
 # ------------------------------------------------------------------
 # Main pipeline
 # ------------------------------------------------------------------
@@ -31,6 +51,7 @@ def run(
     models:   list[str] | None = None,
     fhe_mode: str = "simulate",
     n_bits: int | None = None,
+    device: str | None = None,
     fhe_config_override=None,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
@@ -45,6 +66,10 @@ def run(
     is independent and writes uniquely-named output files, so calls can run
     in parallel as separate processes.
 
+    `device` overrides config/fhe.yaml's `device` setting ("cpu" or "cuda")
+    for `.compile()`. Checked eagerly so a bad "cuda" request fails before
+    any training happens.
+
     Returns:
         dict: {dataset: {model: {metrics, profiling, n_bits}}}
     """
@@ -56,12 +81,15 @@ def run(
     if n_bits is not None:
         fhe_config = inject_n_bits(fhe_config, n_bits)
 
+    active_device = device or fhe_config.get("device", "cpu")
+    _check_device(active_device)
+
     logger.debug(
         f"FHE pipeline started — datasets: {targets_datasets}, "
-        f"models: {targets_models}, fhe_mode: {fhe_mode}"
+        f"models: {targets_models}, fhe_mode: {fhe_mode}, device: {active_device}"
     )
 
-    _log_section(f"FHE  |  mode: {fhe_mode}")
+    _log_section(f"FHE  |  mode: {fhe_mode}  |  device: {active_device}")
 
     results = {}
 
@@ -97,7 +125,7 @@ def run(
                     model.model.fit(model.X_train, model.y_train)
 
                 with profiler.time_block("training_compile"):
-                    model.model.compile(model.X_train)
+                    model.model.compile(model.X_train, device=active_device)
 
                 model._save_model()
 
