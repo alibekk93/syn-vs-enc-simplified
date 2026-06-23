@@ -3,8 +3,6 @@ numpy
 scikit-learn
 PyYAML
 xgboost
-synthcity
 seaborn
 matplotlib
 psutil
-torch==2.4.1+computecanada

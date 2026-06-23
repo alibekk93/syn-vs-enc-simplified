@@ -1,0 +1,8 @@
+-r base.txt
+synthcity
+
+# Azure has normal internet access, so no wheel-tag pin is needed (unlike DRAC).
+# Install the CUDA build explicitly if the default pip resolution doesn't pick
+# up a GPU-enabled wheel:
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch

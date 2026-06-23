@@ -1,0 +1,11 @@
+-r base.txt
+synthcity
+
+# DRAC has no internet access for pip dependency resolution, so torch must be
+# pinned to a wheel tag available in DRAC's offline wheelhouse.
+# Before `pip install -r requirements/drac-synthcity.txt`:
+#   module load python/3.11
+#   module load cuda/12.2
+# If the pin below stops being available, find a current tag with:
+#   avail_wheels torch
+torch==2.4.1+computecanada
