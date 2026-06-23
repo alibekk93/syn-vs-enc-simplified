@@ -2,7 +2,13 @@ pandas
 numpy
 scikit-learn
 PyYAML
-xgboost
 seaborn
 matplotlib
 psutil
+
+# xgboost>=2.1 defaults to a CUDA virtual-memory-based GPU allocator
+# (cuMemCreate/cuMemGetAllocationGranularity) that NVIDIA vGPU profiles
+# (e.g. Azure's A10-12Q) don't support, causing CUDA_ERROR_NOT_SUPPORTED on
+# device='cuda' fits. Pinned below the cutoff to use the older, vGPU-safe
+# allocator instead.
+xgboost==2.0.3
