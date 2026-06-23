@@ -1,5 +1,13 @@
 -r base.txt
-synthcity
+
+# synthcity is pinned (not left open like sdv/concrete-ml) because leaving it
+# unpinned makes pip backtrack across 0.2.12 down to 0.2.4, hitting wildly
+# different transitive dependency trees (old pydantic<2.0, pytorch-lightning
+# <2.0, etc.) and eventually failing on long-obsolete releases that hard-cap
+# torch<2.0 — even though 0.2.12 itself is compatible with the torch pin
+# below. Pinning it forces pip to resolve against exactly one dependency
+# tree instead of exploring eight.
+synthcity==0.2.12
 
 # synthcity needs torch. torch and torchvision are pinned together and
 # installed from the CUDA index in this single resolution pass — do NOT

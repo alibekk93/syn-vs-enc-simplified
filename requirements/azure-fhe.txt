@@ -2,6 +2,13 @@
 concrete-ml
 
 # For the FHE venv (.venv-fhe), after `pip install -r requirements/azure-fhe.txt`,
-# swap in the GPU-enabled compiler to use config/fhe.yaml's `device: cuda`:
+# swap in the GPU-enabled compiler to use config/fhe.yaml's `device: cuda`.
+# Pin the version explicitly to whatever concrete-ml just pulled in above
+# (`pip show concrete-python`) — the GPU index's default/latest release is on
+# a different, incompatible version line (e.g. calendar-versioned
+# 2024.12.19) and installing it unpinned breaks concrete-ml's import-time
+# version check:
 #   pip uninstall concrete-python
-#   pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python
+#   pip install --trusted-host pypi.zama.ai --extra-index-url https://pypi.zama.ai/gpu concrete-python==<version from pip show>
+# jobs/setup_azure_envs.sh automates this — prefer running that over doing it
+# by hand.

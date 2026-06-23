@@ -1,5 +1,10 @@
 -r base.txt
-synthcity
+
+# Pinned (not left open) to avoid pip backtracking across many synthcity
+# releases with wildly different transitive dependency trees — confirmed
+# on Azure (see requirements/azure-synthcity.txt) that leaving this open
+# causes ResolutionImpossible failures against the torch pin below.
+synthcity==0.2.12
 
 # DRAC has no internet access for pip dependency resolution, so torch must be
 # pinned to a wheel tag available in DRAC's offline wheelhouse.
