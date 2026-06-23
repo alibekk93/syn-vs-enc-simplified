@@ -28,3 +28,4 @@ synthcity==0.2.12
 --extra-index-url https://download.pytorch.org/whl/cu121
 torch==2.2.2
 torchvision==0.17.2
+xgboost

@@ -11,4 +11,4 @@ psutil
 # (e.g. Azure's A10-12Q) don't support, causing CUDA_ERROR_NOT_SUPPORTED on
 # device='cuda' fits. Pinned below the cutoff to use the older, vGPU-safe
 # allocator instead.
-xgboost==2.0.3
+

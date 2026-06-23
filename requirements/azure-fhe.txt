@@ -12,3 +12,4 @@ concrete-ml
 #   pip install --trusted-host pypi.zama.ai --extra-index-url https://pypi.zama.ai/gpu concrete-python==<version from pip show>
 # jobs/setup_azure_envs.sh automates this — prefer running that over doing it
 # by hand.
+xgboost==1.6.2
