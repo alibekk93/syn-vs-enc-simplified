@@ -39,7 +39,7 @@
 random_seed: 42
 test_size: 0.2
 stratify: true
-device: cpu
+device: cuda
 
 models:
   - name: logistic_regression
