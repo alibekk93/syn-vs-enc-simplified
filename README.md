@@ -31,7 +31,6 @@ mirroring how bootstrap parallelizes across seeds via `run-single-bootstrap`.
 - % oversampling (e.g. 100 is same as original)
 
 ### bugs
-- ctgan: `Training failed: logistic_regression on ctgan__heart_disease: [Errno 2] No such file or directory: 'data/processed/ctgan__heart_disease.csv'`
 - synthcity:
 ```
 2026-06-22 11:11:04,827 [INFO]   SYNTHETIC: bayesian_network  |  device: cuda

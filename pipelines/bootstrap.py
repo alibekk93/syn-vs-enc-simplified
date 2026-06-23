@@ -75,12 +75,10 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     with open(resource_config_path, 'w') as f:
         yaml.dump(base_resource, f, default_flow_style=False)
 
-    # Modify synthesizers config: set output directories under bootstrap seed
-    if "output" not in base_synth:
-        base_synth["output"] = {}
-    base_synth["output"]["synthetic_dir"]    = f"data/synthetic/bootstrap/{seed}"
-    base_synth["output"]["synthesizers_dir"] = f"synthesizers/bootstrap/{seed}"
-
+    # Synthesizers config is left unmodified — synthetic_dir/synthesizers_dir
+    # stay at the base config's defaults (data/processed, synthesizers), the
+    # same location Model.load_data and Dataset.processed_path already use
+    # for preprocessed bootstrap data (neither is seed-namespaced).
     synth_config_path = tmp_dir / "synthesizers.yaml"
     with open(synth_config_path, 'w') as f:
         yaml.dump(base_synth, f, default_flow_style=False)
@@ -113,7 +111,6 @@ def run(
         - Create dataset config pointing to bootstrap samples
         - Create model config with output dirs under results/bootstrap/{seed} and models/bootstrap/{seed}
         - Create resource config with output dir under results/bootstrap/{seed}/resource_profiles
-        - Create synthesizer config with output dirs under data/synthetic/bootstrap/{seed} and synthesizers/bootstrap/{seed}
         - Run preprocessing on bootstrap sample
         - Run standard modeling on preprocessed bootstrap sample
         - Run synthetic modeling on preprocessed bootstrap sample
