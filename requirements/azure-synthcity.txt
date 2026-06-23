@@ -1,5 +1,11 @@
 -r base.txt
 
+# base.txt leaves numpy unpinned (fine for sdv, which resolves to numpy 2.x),
+# but synthcity 0.2.12 and xgbse (a synthcity dependency) both hard-cap
+# numpy<2.0 — pin it here to override base.txt's open constraint for this
+# venv specifically.
+numpy<2.0,>=1.26.4
+
 # synthcity is pinned (not left open like sdv/concrete-ml) because leaving it
 # unpinned makes pip backtrack across 0.2.12 down to 0.2.4, hitting wildly
 # different transitive dependency trees (old pydantic<2.0, pytorch-lightning
