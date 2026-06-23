@@ -8,4 +8,12 @@ synthcity
 #   module load cuda/12.2
 # If the pin below stops being available, find a current tag with:
 #   avail_wheels torch
+#
+# WARNING: synthcity 0.2.1x requires torch<2.3,>=2.1 — the 2.4.1 pin below
+# failed dependency resolution on Azure for this exact reason (see
+# requirements/azure-synthcity.txt). This hasn't been hit on DRAC yet only
+# because `avail_wheels`/offline installs may not enforce synthcity's pip
+# constraint the way a normal resolver does — if this venv's install starts
+# failing or installs an incompatible synthcity, look for a 2.2.x
+# +computecanada tag via `avail_wheels torch` instead.
 torch==2.4.1+computecanada

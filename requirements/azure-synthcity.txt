@@ -7,6 +7,10 @@ synthcity
 # a different index without touching torchvision and leaves the two
 # mismatched (symptom: "partially initialized module 'torchvision' has no
 # attribute 'extension'" on import).
+#
+# torch is capped at 2.2.2 (not the 2.4.1 used in azure-sdv.txt) because
+# synthcity 0.2.1x requires torch<2.3,>=2.1 — pinning higher makes pip's
+# resolver fail with ResolutionImpossible.
 --extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.4.1
-torchvision==0.19.1
+torch==2.2.2
+torchvision==0.17.2
