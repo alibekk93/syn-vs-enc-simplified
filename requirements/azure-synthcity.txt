@@ -1,8 +1,12 @@
 -r base.txt
 synthcity
 
-# Azure has normal internet access, so no wheel-tag pin is needed (unlike DRAC).
-# Install the CUDA build explicitly if the default pip resolution doesn't pick
-# up a GPU-enabled wheel:
-#   pip install torch --index-url https://download.pytorch.org/whl/cu121
-torch
+# synthcity needs torch. torch and torchvision are pinned together and
+# installed from the CUDA index in this single resolution pass — do NOT
+# `pip install torch` separately afterwards, since that reinstalls torch from
+# a different index without touching torchvision and leaves the two
+# mismatched (symptom: "partially initialized module 'torchvision' has no
+# attribute 'extension'" on import).
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1
+torchvision==0.19.1
