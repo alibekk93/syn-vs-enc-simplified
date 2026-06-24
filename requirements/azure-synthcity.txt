@@ -4,7 +4,7 @@
 # but synthcity 0.2.12 and xgbse (a synthcity dependency) both hard-cap
 # numpy<2.0 — pin it here to override base.txt's open constraint for this
 # venv specifically.
-numpy<2.0,>=1.26.4
+numpy==1.26.4
 
 # synthcity is pinned (not left open like sdv/concrete-ml) because leaving it
 # unpinned makes pip backtrack across 0.2.12 down to 0.2.4, hitting wildly
@@ -13,7 +13,7 @@ numpy<2.0,>=1.26.4
 # torch<2.0 — even though 0.2.12 itself is compatible with the torch pin
 # below. Pinning it forces pip to resolve against exactly one dependency
 # tree instead of exploring eight.
-synthcity==0.2.12
+synthcity
 
 # synthcity needs torch. torch and torchvision are pinned together and
 # installed from the CUDA index in this single resolution pass — do NOT
@@ -26,6 +26,6 @@ synthcity==0.2.12
 # synthcity 0.2.1x requires torch<2.3,>=2.1 — pinning higher makes pip's
 # resolver fail with ResolutionImpossible.
 --extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.2.2
-torchvision==0.17.2
+torch==2.4.1
+torchvision
 xgboost
