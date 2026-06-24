@@ -249,20 +249,29 @@ class Model:
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Return class predictions for X."""
-        return self.model.predict(self._prepare_input(X))
+        with self._xgb_cuda_warn_suppressed():
+            return self.model.predict(X)
 
     def predict_proba(self, X: pd.DataFrame) -> Optional[np.ndarray]:
         """Return probability estimates for X, or None if not supported."""
         if hasattr(self.model, "predict_proba"):
-            return self.model.predict_proba(self._prepare_input(X))[:, 1]
+            with self._xgb_cuda_warn_suppressed():
+                return self.model.predict_proba(X)[:, 1]
         return None
 
-    def _prepare_input(self, X: pd.DataFrame):
-        """Wrap input in an XGBoost DMatrix on the right device to avoid device-mismatch warnings."""
-        if self.name == "xgboost" and self.device == "cuda":
-            from xgboost import DMatrix
-            return DMatrix(X, device="cuda")
-        return X
+    def _xgb_cuda_warn_suppressed(self):
+        """Suppress XGBoost's device-mismatch fallback warning when predicting on a cuda model."""
+        import warnings
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _suppressed():
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", message="Falling back to prediction using DMatrix")
+                yield
+
+        from contextlib import nullcontext
+        return _suppressed() if (self.name == "xgboost" and self.device == "cuda") else nullcontext()
 
     def evaluate(self, on: str = "test") -> dict:
         """
