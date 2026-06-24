@@ -249,13 +249,20 @@ class Model:
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Return class predictions for X."""
-        return self.model.predict(X)
+        return self.model.predict(self._prepare_input(X))
 
     def predict_proba(self, X: pd.DataFrame) -> Optional[np.ndarray]:
         """Return probability estimates for X, or None if not supported."""
         if hasattr(self.model, "predict_proba"):
-            return self.model.predict_proba(X)[:, 1]
+            return self.model.predict_proba(self._prepare_input(X))[:, 1]
         return None
+
+    def _prepare_input(self, X: pd.DataFrame):
+        """Wrap input in an XGBoost DMatrix on the right device to avoid device-mismatch warnings."""
+        if self.name == "xgboost" and self.device == "cuda":
+            from xgboost import DMatrix
+            return DMatrix(X, device="cuda")
+        return X
 
     def evaluate(self, on: str = "test") -> dict:
         """
