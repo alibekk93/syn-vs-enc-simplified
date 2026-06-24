@@ -10,3 +10,5 @@ sdv
 # If the pin below stops being available, find a current tag with:
 #   avail_wheels torch
 torch==2.4.1+computecanada
+torchvision
+xgboost

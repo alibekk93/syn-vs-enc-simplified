@@ -29,3 +29,5 @@ synthcity==0.2.12
 # failing or installs an incompatible synthcity, look for a 2.2.x
 # +computecanada tag via `avail_wheels torch` instead.
 torch==2.4.1+computecanada
+torchvision
+xgboost
