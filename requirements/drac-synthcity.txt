@@ -5,13 +5,13 @@
 # numpy<2.0 — pin it here to override base.txt's open constraint for this
 # venv specifically. Confirmed needed on Azure (see
 # requirements/azure-synthcity.txt); applying the same fix here pre-emptively.
-numpy<2.0,>=1.26.4
+numpy==1.26.4
 
 # Pinned (not left open) to avoid pip backtracking across many synthcity
 # releases with wildly different transitive dependency trees — confirmed
 # on Azure (see requirements/azure-synthcity.txt) that leaving this open
 # causes ResolutionImpossible failures against the torch pin below.
-synthcity==0.2.12
+synthcity
 
 # DRAC has no internet access for pip dependency resolution, so torch must be
 # pinned to a wheel tag available in DRAC's offline wheelhouse.
@@ -28,6 +28,7 @@ synthcity==0.2.12
 # constraint the way a normal resolver does — if this venv's install starts
 # failing or installs an incompatible synthcity, look for a 2.2.x
 # +computecanada tag via `avail_wheels torch` instead.
-torch==2.4.1+computecanada
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1
 torchvision
 xgboost

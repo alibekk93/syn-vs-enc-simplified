@@ -47,7 +47,7 @@ output:
   synthetic_dir: data/processed
   synthesizers_dir: synthesizers
 
-device: cuda
+device: cpu
 
 methods:
   gaussian_copula:
