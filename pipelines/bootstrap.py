@@ -40,14 +40,18 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     base_resource = load_config(RESOURCE_CFG)
     base_synth    = load_config(SYNTH_CFG)
 
-    # Modify datasets config: add raw_path for each dataset pointing to bootstrap sample
-    bootstrap_raw_dir = Path(f"data/bootstrap/{seed}")
+    # Modify datasets config: add raw_path and processed_path for each dataset.
+    # Both paths are seed-namespaced so concurrent SLURM array tasks (different seeds,
+    # same dataset) do not clobber each other's files.
+    bootstrap_raw_dir       = Path(f"data/bootstrap/{seed}")
+    bootstrap_processed_dir = Path(f"data/processed/{seed}")
     bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
+    bootstrap_processed_dir.mkdir(parents=True, exist_ok=True)
 
     for ds_name in datasets:
         if ds_name in base_datasets:
-            # Ensure raw_path is set to the bootstrap sample location
-            base_datasets[ds_name]["raw_path"] = str(bootstrap_raw_dir / f"{ds_name}.csv")
+            base_datasets[ds_name]["raw_path"]       = str(bootstrap_raw_dir       / f"{ds_name}.csv")
+            base_datasets[ds_name]["processed_path"] = str(bootstrap_processed_dir / f"{ds_name}.csv")
         else:
             logger.warning(f"Dataset '{ds_name}' not found in base config; skipping raw_path override.")
 
@@ -75,10 +79,14 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     with open(resource_config_path, 'w') as f:
         yaml.dump(base_resource, f, default_flow_style=False)
 
-    # Synthesizers config is left unmodified — synthetic_dir/synthesizers_dir
-    # stay at the base config's defaults (data/processed, synthesizers), the
-    # same location Model.load_data and Dataset.processed_path already use
-    # for preprocessed bootstrap data (neither is seed-namespaced).
+    # Set synthetic_dir to the seed-namespaced processed directory so synthetic
+    # CSVs land alongside the preprocessed real data for this seed.  Model.load_data()
+    # for synthetic datasets (e.g. "ctgan__diabetes") resolves the path as
+    # Path(processed_path).parent / f"{synth}__{dataset}.csv", which matches.
+    if "output" not in base_synth:
+        base_synth["output"] = {}
+    base_synth["output"]["synthetic_dir"] = str(bootstrap_processed_dir)
+
     synth_config_path = tmp_dir / "synthesizers.yaml"
     with open(synth_config_path, 'w') as f:
         yaml.dump(base_synth, f, default_flow_style=False)

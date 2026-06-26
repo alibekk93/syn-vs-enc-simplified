@@ -355,6 +355,10 @@ class Synthesizer:
     # ------------------------------------------------------------------
 
     def _save_synthetic(self, df: pd.DataFrame) -> None:
+        nan_rows = int(df.isna().any(axis=1).sum())
+        if nan_rows > 0:
+            logger.warning(f"[{self.name}] Dropping {nan_rows} NaN rows from synthetic {self.dataset_name} data")
+            df = df.dropna()
         self.synthetic_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthetic_dir / f"{self.name}__{self.dataset_name}.csv"
         df.to_csv(path, index=False)
