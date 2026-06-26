@@ -1,34 +1,16 @@
--r base.txt
-
-# base.txt leaves numpy unpinned (fine for sdv, which resolves to numpy 2.x),
-# but synthcity 0.2.12 and xgbse (a synthcity dependency) both hard-cap
-# numpy<2.0 — pin it here to override base.txt's open constraint for this
-# venv specifically. Confirmed needed on Azure (see
-# requirements/azure-synthcity.txt); applying the same fix here pre-emptively.
 numpy==1.26.4
-
-# Pinned (not left open) to avoid pip backtracking across many synthcity
-# releases with wildly different transitive dependency trees — confirmed
-# on Azure (see requirements/azure-synthcity.txt) that leaving this open
-# causes ResolutionImpossible failures against the torch pin below.
+pandas>=2.1,<3.0
+scikit-learn>=1.2
+PyYAML
+seaborn
+matplotlib
+psutil
+torch==2.2.1
+torchvision==0.17.1
+xgboost<3.0.0
+opacus<1.5.4
+transformers<4.33.0
+accelerate<0.20.4
+fastai<2.8
+fastcore<1.8
 synthcity
-
-# DRAC has no internet access for pip dependency resolution, so torch must be
-# pinned to a wheel tag available in DRAC's offline wheelhouse.
-# Before `pip install -r requirements/drac-synthcity.txt`:
-#   module load python/3.11
-#   module load cuda/12.2
-# If the pin below stops being available, find a current tag with:
-#   avail_wheels torch
-#
-# WARNING: synthcity 0.2.1x requires torch<2.3,>=2.1 — the 2.4.1 pin below
-# failed dependency resolution on Azure for this exact reason (see
-# requirements/azure-synthcity.txt). This hasn't been hit on DRAC yet only
-# because `avail_wheels`/offline installs may not enforce synthcity's pip
-# constraint the way a normal resolver does — if this venv's install starts
-# failing or installs an incompatible synthcity, look for a 2.2.x
-# +computecanada tag via `avail_wheels torch` instead.
---extra-index-url https://download.pytorch.org/whl/cu121
-torch==2.4.1
-torchvision
-xgboost
