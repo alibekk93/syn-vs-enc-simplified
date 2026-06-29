@@ -243,35 +243,26 @@ class Model:
             raise RuntimeError("Call split() before train()")
 
         logger.debug(f"[{self.name}] Training...")
-        self.model.fit(self.X_train, self.y_train)
+        self.model.fit(self._to_cuda(self.X_train), self.y_train)
         logger.debug(f"[{self.name}] Training complete")
         self._save_model()
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """Return class predictions for X."""
-        with self._xgb_cuda_warn_suppressed():
-            return self.model.predict(X)
+        return self.model.predict(self._to_cuda(X))
 
     def predict_proba(self, X: pd.DataFrame) -> Optional[np.ndarray]:
         """Return probability estimates for X, or None if not supported."""
         if hasattr(self.model, "predict_proba"):
-            with self._xgb_cuda_warn_suppressed():
-                return self.model.predict_proba(X)[:, 1]
+            return self.model.predict_proba(self._to_cuda(X))[:, 1]
         return None
 
-    def _xgb_cuda_warn_suppressed(self):
-        """Suppress XGBoost's device-mismatch fallback warning when predicting on a cuda model."""
-        import warnings
-        from contextlib import contextmanager
-
-        @contextmanager
-        def _suppressed():
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", message="Falling back to prediction using DMatrix")
-                yield
-
-        from contextlib import nullcontext
-        return _suppressed() if (self.name == "xgboost" and self.device == "cuda") else nullcontext()
+    def _to_cuda(self, X: pd.DataFrame):
+        """Convert DataFrame to a cupy array for GPU XGBoost; pass through for all other cases."""
+        if self.name == "xgboost" and self.device == "cuda":
+            import cupy as cp
+            return cp.array(X.values)
+        return X
 
     def evaluate(self, on: str = "test") -> dict:
         """
