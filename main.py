@@ -133,6 +133,25 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
     logger.info("=== Single bootstrap run complete ===")
 
 
+def verify_gpu(component: str, method: str | None = None, device: str = "cuda"):
+    """Verifies that a GPU-capable component (xgboost / synthesizer / fhe)
+    actually computes on the GPU, not just that device='cuda' was accepted —
+    see src/gpu_verification.py for why a config-only check isn't enough."""
+    from src.gpu_verification import run as run_gpu_verification, SYNTHESIZER_METHODS
+
+    if component == "synthesizer" and method is None:
+        logger.error(f"--method is required when --component synthesizer (choices: {SYNTHESIZER_METHODS})")
+        raise SystemExit(2)
+
+    logger.info(f"=== Verifying GPU usage (component: {component}, device: {device}) ===")
+    passed = run_gpu_verification(component, method=method, device=device)
+    if passed:
+        logger.info("=== GPU verification PASSED ===")
+    else:
+        logger.error("=== GPU verification FAILED ===")
+        raise SystemExit(1)
+
+
 def create_visuals():
     logger.info("=== Creating visualizations ===")
     from src.visualization import generate_all_figures
@@ -247,6 +266,31 @@ if __name__ == "__main__":
         help="Generate visualizations only"
     )
 
+    # ---- verify-gpu ----
+    verify_gpu_parser = subparsers.add_parser(
+        "verify-gpu",
+        help="Verify a GPU-capable component actually computes on the GPU (not just that device='cuda' was accepted)"
+    )
+    verify_gpu_parser.add_argument(
+        "--component",
+        choices=["xgboost", "synthesizer", "fhe", "all"],
+        required=True,
+        help="Which component to verify"
+    )
+    verify_gpu_parser.add_argument(
+        "--method",
+        choices=["ctgan", "nflow", "arf"],
+        default=None,
+        help="Synthesizer method (required when --component synthesizer; checks all three if omitted with --component all)"
+    )
+    verify_gpu_parser.add_argument(
+        "--device",
+        choices=["cpu", "cuda"],
+        default="cuda",
+        help="Device to verify (default: cuda). Use --device cpu as a negative control to confirm "
+             "the check correctly reports GPU NOT used."
+    )
+
     # ---- aggregate-bootstrap ----
     aggregate_parser = subparsers.add_parser(
         "aggregate-bootstrap",
@@ -307,6 +351,9 @@ if __name__ == "__main__":
 
     elif args.command == "create-visuals":
         create_visuals()
+
+    elif args.command == "verify-gpu":
+        verify_gpu(args.component, args.method, args.device)
 
     elif args.command == "aggregate-bootstrap":
         aggregate_bootstrap_results(args.results_dir, args.output)
