@@ -138,15 +138,10 @@ def _dummy_mixed_df(n_rows: int = 500, seed: int = 42) -> pd.DataFrame:
 def _check_xgboost(device: str) -> GpuCheckResult:
     from src.models import Model
 
-    if device == "cuda":
-        try:
-            import cupy  # noqa: F401
-        except ImportError:
-            return GpuCheckResult(
-                "xgboost", False,
-                "cupy is not installed — Model._to_cuda() needs it for GPU xgboost. "
-                "Install a build matching this venv's CUDA version, e.g.: pip install cupy-cuda12x"
-            )
+    # No explicit cupy preflight here: Model._to_cuda() already imports cupy
+    # itself when device='cuda', and run() (the caller) catches ImportError
+    # from this whole function and reports it the same way — no need for the
+    # check to declare its own redundant dependency on it.
 
     baseline = _nvidia_smi_sample()
     if baseline is None:
