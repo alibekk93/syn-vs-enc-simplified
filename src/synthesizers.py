@@ -258,8 +258,8 @@ class Synthesizer:
 
             self.synthesizer = sdv["classes"][self.method](metadata, **params)
         else:
-            if gpu_requested and gpu_capable:
-                params["device"] = "cuda"
+            if gpu_capable:
+                params["device"] = "cuda" if gpu_requested else "cpu"
 
             synthcity = _load_synthcity()
             self.synthesizer = synthcity["plugins"].get(
