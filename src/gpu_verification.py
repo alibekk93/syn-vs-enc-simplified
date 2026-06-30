@@ -200,10 +200,9 @@ def _check_model(name: str, device: str) -> GpuCheckResult:
 
     saved_path = None
     try:
-        # No explicit GPU-array-library preflight: Model._to_cuda() already
-        # imports torch itself when device='cuda' — if it's missing, that's
-        # reported below as UNAVAILABLE rather than declaring a redundant
-        # dependency here.
+        # No explicit cupy preflight: Model._to_cuda() already imports cupy
+        # itself when device='cuda' — if it's missing, that's reported below
+        # as UNAVAILABLE rather than declaring a redundant dependency here.
         with _GpuSampler() as sampler:
             model.train()
         saved_path = model.models_dir / f"{model.mode}__{name}__{model.dataset_name}.joblib"
@@ -222,7 +221,7 @@ def _check_model(name: str, device: str) -> GpuCheckResult:
         booster_device = booster_cfg["learner"]["generic_param"]["device"]
         to_cuda_module = type(model._to_cuda(model.X_train)).__module__
         structural_detail = f"booster.device={booster_device}, _to_cuda→{to_cuda_module}, "
-        structural_says_gpu = "cuda" in booster_device and to_cuda_module.startswith("torch")
+        structural_says_gpu = "cuda" in booster_device and to_cuda_module.startswith("cupy")
 
     if device == "cuda":
         if structural_says_gpu is False:
