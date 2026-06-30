@@ -133,18 +133,14 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
     logger.info("=== Single bootstrap run complete ===")
 
 
-def verify_gpu(component: str, method: str | None = None, device: str = "cuda"):
-    """Verifies that a GPU-capable component (xgboost / synthesizer / fhe)
-    actually computes on the GPU, not just that device='cuda' was accepted —
-    see src/gpu_verification.py for why a config-only check isn't enough."""
-    from src.gpu_verification import run as run_gpu_verification, SYNTHESIZER_METHODS
+def verify_gpu(venv: str, device: str = "cuda"):
+    """Verifies that every GPU-capable synthesizer/model config/{synthesizers,
+    models,fhe}.yaml configures for this venv actually computes on the GPU,
+    not just that device='cuda' was accepted — see src/gpu_verification.py
+    for why a config-only check isn't enough."""
+    from src.gpu_verification import run as run_gpu_verification
 
-    if component == "synthesizer" and method is None:
-        logger.error(f"--method is required when --component synthesizer (choices: {SYNTHESIZER_METHODS})")
-        raise SystemExit(2)
-
-    logger.info(f"=== Verifying GPU usage (component: {component}, device: {device}) ===")
-    passed = run_gpu_verification(component, method=method, device=device)
+    passed = run_gpu_verification(venv, device=device)
     if passed:
         logger.info("=== GPU verification PASSED ===")
     else:
@@ -269,19 +265,16 @@ if __name__ == "__main__":
     # ---- verify-gpu ----
     verify_gpu_parser = subparsers.add_parser(
         "verify-gpu",
-        help="Verify a GPU-capable component actually computes on the GPU (not just that device='cuda' was accepted)"
+        help="Verify every GPU-capable synthesizer/model configured for a venv actually computes on the GPU "
+             "(not just that device='cuda' was accepted)"
     )
     verify_gpu_parser.add_argument(
-        "--component",
-        choices=["xgboost", "synthesizer", "fhe", "all"],
+        "--venv",
+        choices=["sdv", "synthcity", "fhe"],
         required=True,
-        help="Which component to verify"
-    )
-    verify_gpu_parser.add_argument(
-        "--method",
-        choices=["ctgan", "nflow", "arf"],
-        default=None,
-        help="Synthesizer method (required when --component synthesizer; checks all three if omitted with --component all)"
+        help="Which venv this is running in (.venv-sdv / .venv-synthcity / .venv-fhe) — determines which "
+             "synthesizers (from config/synthesizers.yaml) and models (config/models.yaml / config/fhe.yaml) "
+             "are checked. All configured GPU-capable methods/models for that venv are checked automatically."
     )
     verify_gpu_parser.add_argument(
         "--device",
@@ -353,7 +346,7 @@ if __name__ == "__main__":
         create_visuals()
 
     elif args.command == "verify-gpu":
-        verify_gpu(args.component, args.method, args.device)
+        verify_gpu(args.venv, args.device)
 
     elif args.command == "aggregate-bootstrap":
         aggregate_bootstrap_results(args.results_dir, args.output)

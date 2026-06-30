@@ -15,7 +15,24 @@ here requires two independent layers of evidence:
      is vendor/library-agnostic and doesn't rely on a library accurately
      self-reporting what it did — which is exactly what went wrong before.
 
-Run via `python main.py verify-gpu --component {xgboost,synthesizer,fhe,all}`.
+Different pipeline stages run in different venvs on the cluster (.venv-sdv,
+.venv-synthcity, .venv-fhe — see jobs/run_full_pipeline_drac.sh), each with a
+different subset of GPU-capable libraries installed. So checks are organized
+per-venv rather than per-component: `run("sdv"|"synthcity"|"fhe")` reads
+config/synthesizers.yaml, config/models.yaml, and config/fhe.yaml to find
+every method/model that venv is actually configured to run, and reports on
+all of them in one pass — no manual --component/--method selection needed.
+
+Not every configured method has a GPU path at all (e.g. gaussian_copula,
+logistic_regression), and not every environment this runs in will have the
+GPU hardware/library available (e.g. a quick check on a CPU-only dev box).
+Neither of those is a failure — they're reported as SKIP / UNAVAILABLE. The
+only failure (FAIL, nonzero exit) is the actual bug class this exists to
+catch: a GPU-capable item that's GPU-equipped and was asked to use it, but
+the evidence shows it didn't (or, for the --device cpu negative control, used
+the GPU when it shouldn't have).
+
+Run via `python main.py verify-gpu --venv {sdv,synthcity,fhe}`.
 """
 
 import json
@@ -26,6 +43,8 @@ import time
 
 import numpy as np
 import pandas as pd
+
+from src.utils import load_config
 
 logger = logging.getLogger(__name__)
 
@@ -41,16 +60,32 @@ NVIDIA_SMI_CMD = [
 MIN_MEMORY_DELTA_MIB = 5
 MIN_UTILIZATION_PCT = 5
 
+# Synthesizer library ("sdv"/"synthcity", per src.synthesizers.SUPPORTED_SYNTHESIZERS)
+# that each venv is provisioned for — see requirements/drac-sdv.txt / drac-synthcity.txt.
+SYNTH_LIBRARY_BY_VENV = {"sdv": "sdv", "synthcity": "synthcity"}
+
 
 class GpuCheckResult:
-    def __init__(self, component: str, passed: bool, detail: str):
-        self.component = component
-        self.passed = passed
+    SKIP        = "SKIP"         # not GPU-capable at all — not applicable, not an error
+    UNAVAILABLE = "UNAVAILABLE"  # GPU-capable, but no GPU/library here — not an error
+    USED        = "USED"         # GPU-capable, requested, and verified actually used
+    NOT_USED    = "NOT_USED"     # negative control (--device cpu): correctly did NOT use the GPU
+    FAIL        = "FAIL"         # the bug this exists to catch: requested+available but not used
+                                  # (or, in the negative control, used when it shouldn't have been)
+
+    def __init__(self, kind: str, name: str, status: str, detail: str = ""):
+        self.kind = kind    # "synthesizer" | "model" | "fhe_model"
+        self.name = name
+        self.status = status
         self.detail = detail
 
+    @property
+    def label(self) -> str:
+        return f"{self.kind}:{self.name}"
+
     def __str__(self):
-        status = "PASS" if self.passed else "FAIL"
-        return f"[{self.component}] {status} — {self.detail}"
+        line = f"[{self.label}] {self.status}"
+        return f"{line} — {self.detail}" if self.detail else line
 
 
 # ------------------------------------------------------------------
@@ -65,7 +100,7 @@ def _nvidia_smi_sample():
         util_str, mem_str = out.strip().splitlines()[0].split(",")
         return float(util_str.strip()), float(mem_str.strip())
     except Exception as e:
-        logger.warning(f"nvidia-smi sampling failed: {e}")
+        logger.debug(f"nvidia-smi sampling failed: {e}")
         return None
 
 
@@ -131,24 +166,33 @@ def _dummy_mixed_df(n_rows: int = 500, seed: int = 42) -> pd.DataFrame:
     })
 
 
+def _runtime_evidence(sampler: _GpuSampler, baseline_mem: float) -> tuple[bool, str]:
+    mem_delta = sampler.peak_memory - baseline_mem
+    peak_util = sampler.peak_utilization
+    detail = f"nvidia-smi mem +{mem_delta:.0f}MiB, peak_util={peak_util:.0f}%"
+    ok = mem_delta >= MIN_MEMORY_DELTA_MIB or peak_util >= MIN_UTILIZATION_PCT
+    return ok, detail
+
+
 # ------------------------------------------------------------------
-# Per-component checks
+# Per-item checks
 # ------------------------------------------------------------------
 
-def _check_xgboost(device: str) -> GpuCheckResult:
-    from src.models import Model
+def _check_model(name: str, device: str) -> GpuCheckResult:
+    from src.models import Model, GPU_CAPABLE_MODELS
 
-    # No explicit cupy preflight here: Model._to_cuda() already imports cupy
-    # itself when device='cuda', and run() (the caller) catches ImportError
-    # from this whole function and reports it the same way — no need for the
-    # check to declare its own redundant dependency on it.
+    kind = "model"
+    if name not in GPU_CAPABLE_MODELS:
+        return GpuCheckResult(kind, name, GpuCheckResult.SKIP, "no GPU path for this model type")
 
-    baseline = _nvidia_smi_sample()
-    if baseline is None:
-        return GpuCheckResult("xgboost", False, "nvidia-smi unavailable — cannot verify runtime GPU usage")
-    baseline_mem = baseline[1]
+    baseline_mem = 0.0
+    if device == "cuda":
+        baseline = _nvidia_smi_sample()
+        if baseline is None:
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, "nvidia-smi unavailable in this environment")
+        baseline_mem = baseline[1]
 
-    model = Model("xgboost", device=device, mode="gpu_verification")
+    model = Model(name, device=device, mode="gpu_verification")
     model.df = _dummy_classification_df()
     model.target = "target"
     model.dataset_name = "gpu_verification_dummy"
@@ -156,35 +200,41 @@ def _check_xgboost(device: str) -> GpuCheckResult:
 
     saved_path = None
     try:
+        # No explicit cupy preflight: Model._to_cuda() already imports cupy
+        # itself when device='cuda' — if it's missing, that's reported below
+        # as UNAVAILABLE rather than declaring a redundant dependency here.
         with _GpuSampler() as sampler:
             model.train()
-        saved_path = model.models_dir / f"{model.mode}__xgboost__{model.dataset_name}.joblib"
+        saved_path = model.models_dir / f"{model.mode}__{name}__{model.dataset_name}.joblib"
+    except ImportError as e:
+        return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"GPU library not installed: {e}")
     finally:
         if saved_path is not None:
             saved_path.unlink(missing_ok=True)
 
-    booster_cfg = json.loads(model.model.get_booster().save_config())
-    booster_device = booster_cfg["learner"]["generic_param"]["device"]
-    to_cuda_module = type(model._to_cuda(model.X_train)).__module__
+    runtime_ok, runtime_detail = _runtime_evidence(sampler, baseline_mem)
 
-    mem_delta = sampler.peak_memory - baseline_mem
-    peak_util = sampler.peak_utilization
-    runtime_detail = f"nvidia-smi mem +{mem_delta:.0f}MiB, peak_util={peak_util:.0f}%"
+    structural_detail = ""
+    structural_says_gpu = None  # None = no structural introspection available for this model type
+    if name == "xgboost":
+        booster_cfg = json.loads(model.model.get_booster().save_config())
+        booster_device = booster_cfg["learner"]["generic_param"]["device"]
+        to_cuda_module = type(model._to_cuda(model.X_train)).__module__
+        structural_detail = f"booster.device={booster_device}, _to_cuda→{to_cuda_module}, "
+        structural_says_gpu = "cuda" in booster_device and to_cuda_module.startswith("cupy")
 
     if device == "cuda":
-        structural_ok = "cuda" in booster_device and to_cuda_module.startswith("cupy")
-        runtime_ok = mem_delta >= MIN_MEMORY_DELTA_MIB or peak_util >= MIN_UTILIZATION_PCT
-        detail = f"booster.device={booster_device}, _to_cuda→{to_cuda_module}, {runtime_detail}"
-        if not structural_ok:
-            detail = "structural check failed — " + detail
-        elif not runtime_ok:
-            detail = "no measurable GPU memory/utilization delta — " + detail
-        return GpuCheckResult("xgboost", structural_ok and runtime_ok, detail)
+        if structural_says_gpu is False:
+            return GpuCheckResult(kind, name, GpuCheckResult.FAIL,
+                                   f"structural check shows CPU despite device='cuda' — {structural_detail}{runtime_detail}")
+        if not runtime_ok:
+            return GpuCheckResult(kind, name, GpuCheckResult.FAIL,
+                                   f"no measurable GPU memory/utilization delta — {structural_detail}{runtime_detail}")
+        return GpuCheckResult(kind, name, GpuCheckResult.USED, f"{structural_detail}{runtime_detail}")
     else:
-        # Negative control: device='cpu' should NOT touch the GPU.
-        passed = booster_device == "cpu" and to_cuda_module == "pandas.core.frame"
-        detail = f"(negative control) booster.device={booster_device}, _to_cuda→{to_cuda_module}, {runtime_detail}"
-        return GpuCheckResult("xgboost", passed, detail)
+        unexpected_gpu = runtime_ok or structural_says_gpu is True
+        status = GpuCheckResult.FAIL if unexpected_gpu else GpuCheckResult.NOT_USED
+        return GpuCheckResult(kind, name, status, f"(negative control) {structural_detail}{runtime_detail}")
 
 
 def _find_torch_device(obj, max_depth: int = 3):
@@ -217,28 +267,32 @@ def _find_torch_device(obj, max_depth: int = 3):
     return None
 
 
-def _check_synthesizer(method: str, device: str) -> GpuCheckResult:
+def _check_synthesizer(name: str, device: str) -> GpuCheckResult:
     from src.synthesizers import Synthesizer, GPU_CAPABLE_SYNTHESIZERS
 
-    label = f"synthesizer:{method}"
+    kind = "synthesizer"
+    if name not in GPU_CAPABLE_SYNTHESIZERS:
+        return GpuCheckResult(kind, name, GpuCheckResult.SKIP, "no GPU path for this method")
 
-    if method not in GPU_CAPABLE_SYNTHESIZERS:
-        return GpuCheckResult(label, False, f"'{method}' has no GPU path (not in {GPU_CAPABLE_SYNTHESIZERS})")
-
+    baseline_mem = 0.0
     if device == "cuda":
+        baseline = _nvidia_smi_sample()
+        if baseline is None:
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, "nvidia-smi unavailable in this environment")
+        baseline_mem = baseline[1]
+
         try:
             import torch
-            if not torch.cuda.is_available():
-                return GpuCheckResult(label, False, "torch.cuda.is_available() is False — no CUDA GPU visible")
-        except ImportError:
-            return GpuCheckResult(label, False, "torch is not installed in this venv")
+        except ImportError as e:
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"torch not installed in this venv: {e}")
+        if not torch.cuda.is_available():
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, "torch.cuda.is_available() is False — no CUDA GPU visible")
 
-    baseline = _nvidia_smi_sample()
-    if baseline is None:
-        return GpuCheckResult(label, False, "nvidia-smi unavailable — cannot verify runtime GPU usage")
-    baseline_mem = baseline[1]
+    try:
+        synth = Synthesizer(name, device=device)
+    except ImportError as e:
+        return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"library not installed in this venv: {e}")
 
-    synth = Synthesizer(method, device=device)
     df = _dummy_mixed_df()
     synth.dataset_name = "gpu_verification_dummy"
     synth.n_rows_original = len(df)
@@ -246,57 +300,62 @@ def _check_synthesizer(method: str, device: str) -> GpuCheckResult:
     synth.df_test = pd.DataFrame()
     synth.df = synth.df_train
 
-    with _GpuSampler() as sampler:
-        synth.fit()
+    try:
+        with _GpuSampler() as sampler:
+            synth.fit()
+    except ImportError as e:
+        return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"GPU library not installed: {e}")
 
-    torch_device = _find_torch_device(synth.synthesizer)
-    mem_delta = sampler.peak_memory - baseline_mem
-    peak_util = sampler.peak_utilization
-    runtime_detail = f"nvidia-smi mem +{mem_delta:.0f}MiB, peak_util={peak_util:.0f}%"
-    runtime_ok = mem_delta >= MIN_MEMORY_DELTA_MIB or peak_util >= MIN_UTILIZATION_PCT
+    try:
+        torch_device = _find_torch_device(synth.synthesizer)
+    except ImportError:
+        torch_device = None
+
+    runtime_ok, runtime_detail = _runtime_evidence(sampler, baseline_mem)
+    structural_detail = f"model.device={torch_device}, " if torch_device is not None else "model.device=<unresolved>, "
+    structural_says_gpu = (torch_device.type == "cuda") if torch_device is not None else None
 
     if device == "cuda":
-        if torch_device is not None:
-            structural_ok = torch_device.type == "cuda"
-            detail = f"model.device={torch_device}, {runtime_detail}"
-        else:
-            # Couldn't introspect a device attribute on this library version —
-            # fall back to runtime evidence alone (see _find_torch_device docstring).
-            structural_ok = True
-            detail = f"model.device=<unresolved, see _find_torch_device>, {runtime_detail}"
-        passed = structural_ok and runtime_ok
+        if structural_says_gpu is False:
+            return GpuCheckResult(kind, name, GpuCheckResult.FAIL,
+                                   f"structural check shows CPU despite device='cuda' — {structural_detail}{runtime_detail}")
         if not runtime_ok:
-            detail = "no measurable GPU memory/utilization delta — " + detail
-        return GpuCheckResult(label, passed, detail)
+            return GpuCheckResult(kind, name, GpuCheckResult.FAIL,
+                                   f"no measurable GPU memory/utilization delta — {structural_detail}{runtime_detail}")
+        return GpuCheckResult(kind, name, GpuCheckResult.USED, f"{structural_detail}{runtime_detail}")
     else:
-        passed = (torch_device is None or torch_device.type == "cpu") and not runtime_ok
-        detail = f"(negative control) model.device={torch_device}, {runtime_detail}"
-        return GpuCheckResult(label, passed, detail)
+        unexpected_gpu = runtime_ok or structural_says_gpu is True
+        status = GpuCheckResult.FAIL if unexpected_gpu else GpuCheckResult.NOT_USED
+        return GpuCheckResult(kind, name, status, f"(negative control) {structural_detail}{runtime_detail}")
 
 
-def _check_fhe(device: str) -> GpuCheckResult:
-    from src.fhe_models import FHEModel
+def _check_fhe_model(name: str, device: str) -> GpuCheckResult:
+    kind = "fhe_model"
 
+    baseline_mem = 0.0
     if device == "cuda":
         try:
             import concrete.compiler
-        except ImportError:
-            return GpuCheckResult("fhe", False, "concrete.compiler is not installed in this venv")
+        except ImportError as e:
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"concrete.compiler not installed in this venv: {e}")
         if not concrete.compiler.check_gpu_enabled():
-            return GpuCheckResult(
-                "fhe", False,
-                "this concrete-python build has no GPU support. Install with: "
-                "pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python"
-            )
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE,
+                                   "this concrete-python build has no GPU support — install with: "
+                                   "pip install --extra-index-url https://pypi.zama.ai/gpu concrete-python")
         if not concrete.compiler.check_gpu_available():
-            return GpuCheckResult("fhe", False, "no GPU available to this process (concrete.compiler.check_gpu_available() is False)")
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, "no GPU available to this process")
 
-    baseline = _nvidia_smi_sample()
-    if baseline is None:
-        return GpuCheckResult("fhe", False, "nvidia-smi unavailable — cannot verify runtime GPU usage")
-    baseline_mem = baseline[1]
+        baseline = _nvidia_smi_sample()
+        if baseline is None:
+            return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, "nvidia-smi unavailable in this environment")
+        baseline_mem = baseline[1]
 
-    model = FHEModel("xgboost", fhe_cfg={"device": device})
+    try:
+        from src.fhe_models import FHEModel
+    except ImportError as e:
+        return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"concrete-ml not installed in this venv: {e}")
+
+    model = FHEModel(name, fhe_cfg={"device": device})
     df = _dummy_classification_df(n_rows=300, n_features=6)
     model.df = df
     model.target = "target"
@@ -311,68 +370,86 @@ def _check_fhe(device: str) -> GpuCheckResult:
             # Compiling alone may not exercise the GPU — actual execution
             # happens at inference, so run a couple of encrypted predictions too.
             model.predict(model.X_test[:2], fhe="execute")
-        saved_path = model.models_dir / f"{model.mode}__xgboost__{model.dataset_name}.json"
+        saved_path = model.models_dir / f"{model.mode}__{name}__{model.dataset_name}.json"
+    except ImportError as e:
+        return GpuCheckResult(kind, name, GpuCheckResult.UNAVAILABLE, f"GPU library not installed: {e}")
     finally:
         if saved_path is not None:
             saved_path.unlink(missing_ok=True)
 
-    mem_delta = sampler.peak_memory - baseline_mem
-    peak_util = sampler.peak_utilization
-    runtime_detail = f"nvidia-smi mem +{mem_delta:.0f}MiB, peak_util={peak_util:.0f}%"
-    runtime_ok = mem_delta >= MIN_MEMORY_DELTA_MIB or peak_util >= MIN_UTILIZATION_PCT
+    # concrete-ml's compiled circuit doesn't expose a documented "which device
+    # did this run on" attribute, so runtime evidence is the only signal here
+    # (structural evidence is the eager check_gpu_available() preflight above).
+    runtime_ok, runtime_detail = _runtime_evidence(sampler, baseline_mem)
 
     if device == "cuda":
-        # concrete-ml's compiled circuit doesn't expose a documented
-        # "which device did this run on" attribute, so runtime evidence is
-        # the primary signal here (structural evidence is just the eager
-        # check_gpu_available() preflight above).
-        detail = runtime_detail if runtime_ok else "no measurable GPU memory/utilization delta — " + runtime_detail
-        return GpuCheckResult("fhe", runtime_ok, detail)
+        status = GpuCheckResult.USED if runtime_ok else GpuCheckResult.FAIL
+        detail = runtime_detail if runtime_ok else f"no measurable GPU memory/utilization delta — {runtime_detail}"
+        return GpuCheckResult(kind, name, status, detail)
     else:
-        detail = f"(negative control) {runtime_detail}"
-        return GpuCheckResult("fhe", not runtime_ok, detail)
+        status = GpuCheckResult.FAIL if runtime_ok else GpuCheckResult.NOT_USED
+        return GpuCheckResult(kind, name, status, f"(negative control) {runtime_detail}")
+
+
+# ------------------------------------------------------------------
+# Config-driven enumeration — "all from configs", no manual selection
+# ------------------------------------------------------------------
+
+def _configured_synthesizers(venv: str) -> list[str]:
+    from src.synthesizers import SUPPORTED_SYNTHESIZERS
+    library = SYNTH_LIBRARY_BY_VENV[venv]
+    cfg = load_config("config/synthesizers.yaml")
+    return [name for name in cfg.get("methods", {}) if SUPPORTED_SYNTHESIZERS.get(name) == library]
+
+
+def _configured_models() -> list[str]:
+    cfg = load_config("config/models.yaml")
+    return [m["name"] for m in cfg.get("models", [])]
+
+
+def _configured_fhe_models() -> list[str]:
+    cfg = load_config("config/fhe.yaml")
+    return list(cfg.get("models", {}).keys())
 
 
 # ------------------------------------------------------------------
 # Dispatcher
 # ------------------------------------------------------------------
 
-SYNTHESIZER_METHODS = ("ctgan", "nflow", "arf")
-
-
-def run(component: str, method: str | None = None, device: str = "cuda") -> bool:
-    """Runs the requested GPU verification check(s) and logs a PASS/FAIL line
-    per component. Returns True only if every check that ran passed."""
-    if component == "synthesizer" and method is None:
-        raise ValueError(f"--method is required when --component synthesizer (choices: {SYNTHESIZER_METHODS})")
+def run(venv: str, device: str = "cuda") -> bool:
+    """Checks every method/model config/{synthesizers,models,fhe}.yaml configures
+    for the given venv, logs a status line for each, and returns True unless
+    any of them FAILed (SKIP/UNAVAILABLE don't count as failure)."""
+    if venv not in SYNTH_LIBRARY_BY_VENV and venv != "fhe":
+        raise ValueError(f"Unknown venv '{venv}' — must be one of: sdv, synthcity, fhe")
 
     results: list[GpuCheckResult] = []
 
-    if component in ("xgboost", "all"):
-        try:
-            results.append(_check_xgboost(device))
-        except ImportError as e:
-            results.append(GpuCheckResult("xgboost", False, f"not available in this venv: {e}"))
+    if venv == "fhe":
+        for name in _configured_fhe_models():
+            results.append(_check_fhe_model(name, device))
+    else:
+        for name in _configured_synthesizers(venv):
+            results.append(_check_synthesizer(name, device))
+        for name in _configured_models():
+            results.append(_check_model(name, device))
 
-    if component in ("synthesizer", "all"):
-        methods = [method] if method else list(SYNTHESIZER_METHODS)
-        for m in methods:
-            try:
-                results.append(_check_synthesizer(m, device))
-            except ImportError as e:
-                results.append(GpuCheckResult(f"synthesizer:{m}", False, f"not available in this venv: {e}"))
-
-    if component in ("fhe", "all"):
-        try:
-            results.append(_check_fhe(device))
-        except ImportError as e:
-            results.append(GpuCheckResult("fhe", False, f"not available in this venv: {e}"))
-
+    logger.info(f"=== GPU verification report — venv: {venv}, device: {device} ===")
+    log_fn_by_status = {
+        GpuCheckResult.FAIL: logger.error,
+        GpuCheckResult.UNAVAILABLE: logger.warning,
+    }
     for r in results:
-        (logger.info if r.passed else logger.error)(str(r))
+        log_fn_by_status.get(r.status, logger.info)(str(r))
 
     if not results:
-        logger.error("No applicable GPU checks ran (component not importable in this venv?)")
-        return False
+        logger.warning(f"No methods/models configured for venv '{venv}' in config/synthesizers.yaml, config/models.yaml, or config/fhe.yaml")
+        return True
 
-    return all(r.passed for r in results)
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r.status] = counts.get(r.status, 0) + 1
+    summary = ", ".join(f"{count} {status}" for status, count in counts.items())
+    logger.info(f"Summary ({venv}): {summary}")
+
+    return counts.get(GpuCheckResult.FAIL, 0) == 0
