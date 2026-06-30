@@ -258,10 +258,19 @@ class Model:
         return None
 
     def _to_cuda(self, X: pd.DataFrame):
-        """Convert DataFrame to a cupy array for GPU XGBoost; pass through for all other cases."""
+        """Move data onto the GPU for GPU XGBoost; pass through for all other cases.
+
+        XGBoost only recognizes input as GPU-resident via the
+        __cuda_array_interface__ protocol — handing it a plain pandas
+        DataFrame/numpy array silently falls back to CPU training even with
+        device='cuda' set (see commit "xgboost gpu fix"). torch satisfies
+        that protocol and is already a dependency everywhere xgboost runs on
+        GPU here (sdv/synthcity venvs need it for their own GPU synthesizers),
+        so it's used instead of adding cupy as a separate GPU array dependency.
+        """
         if self.name == "xgboost" and self.device == "cuda":
-            import cupy as cp
-            return cp.array(X.values)
+            import torch
+            return torch.as_tensor(X.values, device="cuda")
         return X
 
     def evaluate(self, on: str = "test") -> dict:
