@@ -6,6 +6,10 @@
 # venv specifically.
 numpy==1.26.4
 
+# scipy.integrate.trapz was removed in 1.14 (renamed to trapezoid in 1.11,
+# alias dropped in 1.14); synthcity still calls trapz, so cap below the cutoff.
+scipy<1.14
+
 # synthcity is pinned (not left open like sdv/concrete-ml) because leaving it
 # unpinned makes pip backtrack across 0.2.12 down to 0.2.4, hitting wildly
 # different transitive dependency trees (old pydantic<2.0, pytorch-lightning
