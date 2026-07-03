@@ -38,6 +38,7 @@ synthcity
 torch==2.4.1
 torchvision
 xgboost
+scipy==1.11.4
 
 # GPU XGBoost (device='cuda') needs cupy to hand XGBoost a GPU-resident
 # array — see Model._to_cuda() in src/models.py. cupy-cuda12x matches the
