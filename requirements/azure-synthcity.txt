@@ -10,11 +10,6 @@ numpy==1.26.4
 # alias dropped in 1.14); synthcity still calls trapz, so cap below the cutoff.
 scipy<1.14
 
-# Pydantic 2.13 added a breaking check that rejects unannotated class attributes
-# on BaseModel subclasses — synthcity's Plugin base class has `protected_cols`
-# without a ClassVar annotation, causing all synthesizers to fail at init.
-pydantic<2.13
-
 # synthcity is pinned (not left open like sdv/concrete-ml) because leaving it
 # unpinned makes pip backtrack across 0.2.12 down to 0.2.4, hitting wildly
 # different transitive dependency trees (old pydantic<2.0, pytorch-lightning
