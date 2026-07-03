@@ -269,8 +269,12 @@ class Model:
         CUDA tensor, which raises. Keep cupy here.
         """
         if self.name == "xgboost" and self.device == "cuda":
-            import cupy as cp
-            return cp.array(X.values)
+            try:
+                import cupy as cp
+                return cp.array(X.values)
+            except (ImportError, OSError) as e:
+                logger.warning(f"[{self.name}] CuPy unavailable ({e}) — falling back to CPU")
+                self.device = "cpu"
         return X
 
     def evaluate(self, on: str = "test") -> dict:
