@@ -1,5 +1,10 @@
 numpy==1.26.4
 scipy<1.14
+
+# Pydantic 2.13 added a breaking check that rejects unannotated class attributes
+# on BaseModel subclasses — synthcity's Plugin base class has `protected_cols`
+# without a ClassVar annotation, causing all synthesizers to fail at init.
+pydantic<2.13
 pandas>=2.1,<3.0
 scikit-learn>=1.2
 PyYAML
