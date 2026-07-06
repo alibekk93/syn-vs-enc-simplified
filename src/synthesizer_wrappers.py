@@ -165,7 +165,10 @@ class BayesianNetworkWrapper:
         )
 
     def generate(self, count: int) -> GeneratedData:
-        samples = self._model.simulate(n_samples=count, show_progress=False)[self._columns]
+        from pgmpy.sampling import BayesianModelSampling
+
+        sampler = BayesianModelSampling(self._model)
+        samples = sampler.forward_sample(size=count)[self._columns]
 
         result = samples.copy().astype(object)
 
