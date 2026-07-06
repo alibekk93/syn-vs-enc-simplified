@@ -132,7 +132,7 @@ class BayesianNetworkWrapper:
             if col not in bn.nodes():
                 bn.add_node(col)
 
-        bn.fit(encoded, estimator=BayesianEstimator, prior_type="K2", equivalent_sample_size=5)
+        bn.fit(encoded, estimator=BayesianEstimator, estimator_params={"prior_type": "K2", "equivalent_sample_size": 5})
         self._model = bn
 
         logger.debug("[BayesianNetworkWrapper] DAG learned: %d edges", len(edges))
