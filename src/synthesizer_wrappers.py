@@ -66,7 +66,7 @@ class BayesianNetworkWrapper:
 
     def fit(self, df: pd.DataFrame) -> None:
         import importlib as _il
-        from pgmpy.estimators import MaximumLikelihoodEstimator
+        from pgmpy.estimators import DiscreteMLE
         from pgmpy.models import DiscreteBayesianNetwork
 
         def _pgmpy_score(*names):
@@ -130,7 +130,7 @@ class BayesianNetworkWrapper:
             if col not in bn.nodes():
                 bn.add_node(col)
 
-        bn.fit(encoded, estimator=MaximumLikelihoodEstimator)
+        bn.fit(encoded, estimator=DiscreteMLE())
         self._model = bn
 
         logger.debug("[BayesianNetworkWrapper] DAG learned: %d edges", len(edges))
