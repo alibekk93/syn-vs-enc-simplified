@@ -399,7 +399,9 @@ class Synthesizer:
             orig_dtype = self.df[col].dtype
             if pd.api.types.is_integer_dtype(orig_dtype):
                 try:
-                    result[col] = result[col].round().astype(orig_dtype)
+                    col_min = int(self.df[col].min())
+                    col_max = int(self.df[col].max())
+                    result[col] = result[col].round().clip(col_min, col_max).astype(orig_dtype)
                 except (ValueError, OverflowError):
                     logger.warning(f"[{self.name}] Could not restore integer dtype for column '{col}'")
         return result
