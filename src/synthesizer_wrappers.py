@@ -66,12 +66,10 @@ class BayesianNetworkWrapper:
 
     def fit(self, df: pd.DataFrame) -> None:
         import importlib as _il
-        from pgmpy.estimators import BayesianEstimator
-        from pgmpy.models import BayesianNetwork
+        from pgmpy.estimators import MaximumLikelihoodEstimator
+        from pgmpy.models import DiscreteBayesianNetwork
 
         def _pgmpy_score(*names):
-            # pgmpy <1.0 used suffixed names (K2Score, BDeuScore, ...).
-            # pgmpy >=1.0 renamed them (K2, BDeu, BIC, BDs, ...).
             for mod_path in ("pgmpy.estimators", "pgmpy.structure_score"):
                 try:
                     mod = _il.import_module(mod_path)
@@ -127,12 +125,12 @@ class BayesianNetworkWrapper:
         dag = self._learn_structure(encoded, scoring)
         edges = list(dag.edges())
 
-        bn = BayesianNetwork(edges)
+        bn = DiscreteBayesianNetwork(edges)
         for col in self._columns:
             if col not in bn.nodes():
                 bn.add_node(col)
 
-        bn.fit(encoded, estimator=BayesianEstimator, estimator_params={"prior_type": "K2", "equivalent_sample_size": 5})
+        bn.fit(encoded, estimator=MaximumLikelihoodEstimator)
         self._model = bn
 
         logger.debug("[BayesianNetworkWrapper] DAG learned: %d edges", len(edges))
@@ -168,10 +166,7 @@ class BayesianNetworkWrapper:
         )
 
     def generate(self, count: int) -> GeneratedData:
-        from pgmpy.sampling import BayesianModelSampling
-
-        sampler = BayesianModelSampling(self._model)
-        samples = sampler.forward_sample(size=count)[self._columns]
+        samples = self._model.simulate(n_samples=count, show_progress=False)[self._columns]
 
         result = samples.copy().astype(object)
 
