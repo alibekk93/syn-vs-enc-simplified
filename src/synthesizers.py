@@ -401,8 +401,9 @@ class Synthesizer:
                 try:
                     col_min = int(self.df[col].min())
                     col_max = int(self.df[col].max())
-                    result[col] = result[col].round().clip(col_min, col_max).astype(orig_dtype)
-                except (ValueError, OverflowError):
+                    numeric = pd.to_numeric(result[col], errors="coerce")
+                    result[col] = numeric.round().clip(col_min, col_max).astype(orig_dtype)
+                except (TypeError, ValueError, OverflowError):
                     logger.warning(f"[{self.name}] Could not restore integer dtype for column '{col}'")
         return result
 
