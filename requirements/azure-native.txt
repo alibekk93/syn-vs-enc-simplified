@@ -1,0 +1,20 @@
+-r base.txt
+sdv
+
+# ctgan (used by sdv) needs torch. Pinned together with torchvision from the
+# CUDA 12.1 index — do NOT install torch separately, it will mismatch torchvision.
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.4.1
+torchvision==0.19.1
+xgboost==2.0.3
+
+# GPU XGBoost needs cupy — see Model._to_cuda() in src/models.py.
+cupy-cuda12x
+
+# Native synthesizer backends (replace synthcity):
+#   bayesian_network → pgmpy  (structure learning + inference)
+#   nflow            → nflows  (normalizing flows on top of torch)
+#   arf              → arfpy  (adversarial random forests)
+pgmpy
+nflows
+arfpy

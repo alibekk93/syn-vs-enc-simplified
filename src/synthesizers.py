@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # needs the other to even import this module.
 _SDV = None
 _SYNTHCITY = None
+_NATIVE = None
 
 
 def _load_sdv() -> dict:
@@ -49,6 +50,20 @@ def _load_sdv() -> dict:
             "Metadata": Metadata,
         }
     return _SDV
+
+
+def _load_native() -> dict:
+    """Lazily import and cache native synthesizer wrapper classes."""
+    global _NATIVE
+    if _NATIVE is None:
+        from src.synthesizer_wrappers import ARFWrapper, BayesianNetworkWrapper, NFlowWrapper
+
+        _NATIVE = {
+            "bayesian_network": BayesianNetworkWrapper,
+            "nflow": NFlowWrapper,
+            "arf": ARFWrapper,
+        }
+    return _NATIVE
 
 
 def _load_synthcity() -> dict:
@@ -90,13 +105,13 @@ def _load_synthcity() -> dict:
     return _SYNTHCITY
 
 
-# Maps synthesizer name -> backing library ("sdv" or "synthcity").
+# Maps synthesizer name -> backing library ("sdv", "native", or "synthcity").
 SUPPORTED_SYNTHESIZERS = {
     "gaussian_copula": "sdv",
     "ctgan": "sdv",
-    "bayesian_network": "synthcity",
-    "nflow": "synthcity",
-    "arf": "synthcity",
+    "bayesian_network": "native",
+    "nflow": "native",
+    "arf": "native",
 }
 
 # Of SUPPORTED_SYNTHESIZERS, only these are torch-backed neural models with a
@@ -257,6 +272,12 @@ class Synthesizer:
                 params["enable_gpu"] = gpu_requested
 
             self.synthesizer = sdv["classes"][self.method](metadata, **params)
+        elif self.library == "native":
+            if gpu_capable:
+                params["device"] = "cuda" if gpu_requested else "cpu"
+
+            native = _load_native()
+            self.synthesizer = native[self.method](**params)
         else:
             if gpu_capable:
                 params["device"] = "cuda" if gpu_requested else "cpu"
@@ -311,6 +332,12 @@ class Synthesizer:
         if self.library == "sdv":
             self.synthesizer._n_rows_original = self.n_rows_original
             self.synthesizer.save(str(path))
+        elif self.library == "native":
+            import pickle
+            with open(path, "wb") as f:
+                pickle.dump(
+                    {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original}, f
+                )
         else:
             synthcity = _load_synthcity()
             synthcity["save_to_file"](
@@ -341,6 +368,12 @@ class Synthesizer:
             sdv = _load_sdv()
             instance.synthesizer     = sdv["classes"][name].load(str(path))
             instance.n_rows_original = getattr(instance.synthesizer, '_n_rows_original', None)
+        elif instance.library == "native":
+            import pickle
+            with open(path, "rb") as f:
+                payload = pickle.load(f)
+            instance.synthesizer     = payload["synthesizer"]
+            instance.n_rows_original = payload["n_rows_original"]
         else:
             synthcity = _load_synthcity()
             payload = synthcity["load_from_file"](path)
