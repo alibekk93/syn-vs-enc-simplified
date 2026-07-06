@@ -272,7 +272,7 @@ class Model:
             try:
                 import cupy as cp
                 return cp.array(X.values)
-            except (ImportError, OSError) as e:
+            except (ImportError, OSError, RuntimeError) as e:
                 logger.warning(f"[{self.name}] CuPy unavailable ({e}) — falling back to CPU")
                 self.device = "cpu"
         return X
