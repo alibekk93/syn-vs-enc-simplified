@@ -69,21 +69,25 @@ class BayesianNetworkWrapper:
         from pgmpy.estimators import BayesianEstimator
         from pgmpy.models import BayesianNetwork
 
-        def _pgmpy_score(name: str):
-            for mod_path in ("pgmpy.structure_score", "pgmpy.estimators"):
+        def _pgmpy_score(*names):
+            # pgmpy <1.0 used suffixed names (K2Score, BDeuScore, ...).
+            # pgmpy >=1.0 renamed them (K2, BDeu, BIC, BDs, ...).
+            for mod_path in ("pgmpy.estimators", "pgmpy.structure_score"):
                 try:
-                    cls = getattr(_il.import_module(mod_path), name, None)
+                    mod = _il.import_module(mod_path)
+                except ImportError:
+                    continue
+                for name in names:
+                    cls = getattr(mod, name, None)
                     if cls is not None:
                         return cls
-                except ImportError:
-                    pass
-            raise ImportError(f"pgmpy score class {name!r} not found")
+            raise ImportError(f"none of pgmpy score classes {names!r} found")
 
-        K2Score   = _pgmpy_score("K2Score")
-        BDeuScore = _pgmpy_score("BDeuScore")
-        BicScore  = _pgmpy_score("BicScore")
+        K2Score   = _pgmpy_score("K2Score", "K2")
+        BDeuScore = _pgmpy_score("BDeuScore", "BDeu")
+        BicScore  = _pgmpy_score("BicScore", "BIC")
         try:
-            BDsScore = _pgmpy_score("BDsScore")
+            BDsScore = _pgmpy_score("BDsScore", "BDs")
         except ImportError:
             BDsScore = K2Score
         from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder

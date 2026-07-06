@@ -1,26 +1,8 @@
-pandas
-numpy==1.26.4
-scikit-learn
-PyYAML
-seaborn
-matplotlib
-psutil
-
-# synthcity calls scipy.integrate.trapz, removed in 1.14
-scipy<1.14
-
-synthcity
-
-# Pydantic 2.13 added a breaking check that rejects unannotated class attributes
-# on BaseModel subclasses — synthcity's Plugin base class has `protected_cols`
-# without a ClassVar annotation, causing all synthesizers to fail at init.
-pydantic<2.13
-
-# torch.nn.RMSNorm required by current synthcity; added in 2.4
---extra-index-url https://download.pytorch.org/whl/cu121
-torch>=2.4.0,<2.5.0
-
-# cupy-cuda12x: CUDA 12.5+ ships libnvrtc.so.13 (not .so.12); if cupy fails
-# to load at runtime the code falls back to XGBoost CPU mode (see _to_cuda)
-xgboost<3.0.0
-cupy-cuda12x>=13.0
+# Synthcity reqs (issue with dlg and torch versions)
+numpy<2 # for the locked torch
+torch<2.3 # Max due to tsai, newest tsai not on conda # 2.4
+torchmetrics
+tsai==0.3.9
+xgboost <3.0.0
+opacus<1.5.4
+triton==2.0.0 # [linux]
