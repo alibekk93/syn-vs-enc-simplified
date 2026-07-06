@@ -65,13 +65,11 @@ class BayesianNetworkWrapper:
         self._columns: list = []
 
     def fit(self, df: pd.DataFrame) -> None:
-        from pgmpy.estimators import (
-            BayesianEstimator,
-            BDeuScore,
-            BDsScore,
-            BicScore,
-            K2Score,
-        )
+        from pgmpy.estimators import BayesianEstimator
+        try:
+            from pgmpy.structure_score import BDeuScore, BDsScore, BicScore, K2Score
+        except ImportError:
+            from pgmpy.estimators import BDeuScore, BDsScore, BicScore, K2Score
         from pgmpy.models import BayesianNetwork
         from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder
 
@@ -252,7 +250,11 @@ class NFlowWrapper:
             n = len(self._cont_cols)
             cont = self._scaler.inverse_transform(arr[:, idx:idx + n])
             for i, col in enumerate(self._cont_cols):
-                result[col] = cont[:, i]
+                values = cont[:, i]
+                if col in self._binary_cols:
+                    result[col] = np.clip(np.round(values).astype(int), 0, 1)
+                else:
+                    result[col] = values
             idx += n
 
         for col in self._cat_cols:
@@ -344,6 +346,9 @@ class NFlowWrapper:
         self._columns = list(df.columns)
         self._cont_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
         self._cat_cols = [c for c in df.columns if c not in self._cont_cols]
+        self._binary_cols = {
+            c for c in self._cont_cols if set(df[c].dropna().unique()).issubset({0, 1})
+        }
 
         if self._cont_cols:
             self._scaler = StandardScaler()
@@ -421,7 +426,7 @@ class ARFWrapper:
         self._model = None
 
     def fit(self, df: pd.DataFrame) -> None:
-        from arfpy import arf
+        from arfpy.arf import arf
 
         self._model = arf(
             df,
