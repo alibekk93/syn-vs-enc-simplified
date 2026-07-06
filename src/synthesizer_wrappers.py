@@ -65,12 +65,27 @@ class BayesianNetworkWrapper:
         self._columns: list = []
 
     def fit(self, df: pd.DataFrame) -> None:
+        import importlib as _il
         from pgmpy.estimators import BayesianEstimator
-        try:
-            from pgmpy.structure_score import BDeuScore, BDsScore, BicScore, K2Score
-        except ImportError:
-            from pgmpy.estimators import BDeuScore, BDsScore, BicScore, K2Score
         from pgmpy.models import BayesianNetwork
+
+        def _pgmpy_score(name: str):
+            for mod_path in ("pgmpy.structure_score", "pgmpy.estimators"):
+                try:
+                    cls = getattr(_il.import_module(mod_path), name, None)
+                    if cls is not None:
+                        return cls
+                except ImportError:
+                    pass
+            raise ImportError(f"pgmpy score class {name!r} not found")
+
+        K2Score   = _pgmpy_score("K2Score")
+        BDeuScore = _pgmpy_score("BDeuScore")
+        BicScore  = _pgmpy_score("BicScore")
+        try:
+            BDsScore = _pgmpy_score("BDsScore")
+        except ImportError:
+            BDsScore = K2Score
         from sklearn.preprocessing import KBinsDiscretizer, LabelEncoder
 
         self._columns = list(df.columns)
@@ -426,6 +441,9 @@ class ARFWrapper:
         self._model = None
 
     def fit(self, df: pd.DataFrame) -> None:
+        import numpy as _np
+        if not hasattr(_np, "in1d"):
+            _np.in1d = _np.isin  # removed in NumPy 2.0; arfpy still uses it
         from arfpy.arf import arf
 
         self._model = arf(
