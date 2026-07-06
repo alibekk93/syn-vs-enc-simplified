@@ -318,6 +318,7 @@ class Synthesizer:
             synthetic_df = self.synthesizer.generate(count=num_rows).dataframe()
         logger.debug(f"[{self.name}] Sampling complete")
 
+        synthetic_df = self._restore_dtypes(synthetic_df)
         self._save_synthetic(synthetic_df)
         return synthetic_df
 
@@ -386,6 +387,22 @@ class Synthesizer:
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
+
+    def _restore_dtypes(self, synthetic_df: pd.DataFrame) -> pd.DataFrame:
+        """Round-cast synthetic columns back to integer dtype where the training data was integer."""
+        if self.df is None:
+            return synthetic_df
+        result = synthetic_df.copy()
+        for col in result.columns:
+            if col not in self.df.columns:
+                continue
+            orig_dtype = self.df[col].dtype
+            if pd.api.types.is_integer_dtype(orig_dtype):
+                try:
+                    result[col] = result[col].round().astype(orig_dtype)
+                except (ValueError, OverflowError):
+                    logger.warning(f"[{self.name}] Could not restore integer dtype for column '{col}'")
+        return result
 
     def _save_synthetic(self, df: pd.DataFrame) -> None:
         nan_rows = int(df.isna().any(axis=1).sum())
