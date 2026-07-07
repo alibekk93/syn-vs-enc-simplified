@@ -1,5 +1,7 @@
 """FHE training pipeline — trains and evaluates FHE models."""
 
+import gc
+import ctypes
 import logging
 from src.utils import load_config, inject_n_bits, model_n_bits
 from src.fhe_models import FHEModel
@@ -13,6 +15,14 @@ DATASETS_CFG  = "config/datasets.yaml"
 MODELS_CFG    = "config/models.yaml"
 FHE_CFG       = "config/fhe.yaml"
 RESOURCE_CFG  = "config/resource_profiling.yaml"
+
+
+def _malloc_trim() -> None:
+    """Ask glibc to return freed arenas to the OS. No-op on non-glibc platforms."""
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
 
 
 def _log_section(title: str) -> None:
@@ -183,6 +193,28 @@ def run(
                 }
 
                 profiler.reset()
+
+            finally:
+                # Release the compiled circuit and fitted model so their native memory
+                # (Concrete ML's Rust/C++ allocations) is freed before the next model
+                # starts.  Both profiler.save() and profiler.reset() have already run
+                # in either the try or except branch above, so all measurements are
+                # captured and written before we delete anything here.
+                try:
+                    del fhe_circuit
+                except NameError:
+                    pass
+                try:
+                    del model
+                except NameError:
+                    pass
+                gc.collect()
+                _malloc_trim()
+
+        # Dataset boundary: return any remaining glibc arena pages to the OS so
+        # accumulated native memory from this dataset doesn't carry into the next.
+        gc.collect()
+        _malloc_trim()
 
     logger.debug("FHE pipeline complete.")
     return results

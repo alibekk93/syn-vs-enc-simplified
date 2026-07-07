@@ -1,4 +1,6 @@
 """Bootstrap evaluation pipeline — resamples data and runs full experiment pipeline on each sample."""
+import gc
+import ctypes
 import logging
 import json
 import pandas as pd
@@ -11,6 +13,15 @@ import os
 from src.utils import load_config
 
 logger = logging.getLogger(__name__)
+
+
+def _malloc_trim() -> None:
+    """Ask glibc to return freed arenas to the OS. No-op on non-glibc platforms."""
+    try:
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except Exception:
+        pass
+
 
 DATASETS_CFG = "config/datasets.yaml"
 MODELS_CFG   = "config/models.yaml"
@@ -244,6 +255,11 @@ def run(
                     n_bits=n_bits,
                     device=device,
                 )
+                # Dataset boundary: fhe.run trims per-model inside its own finally
+                # blocks, but any remaining glibc arena pages are released here so
+                # the next dataset starts with a clean RSS baseline.
+                gc.collect()
+                _malloc_trim()
 
             # Collect results
             results[dataset_name][seed] = {
