@@ -28,20 +28,8 @@ mirroring how bootstrap parallelizes across seeds via `run-single-bootstrap`.
 - % oversampling line graph
 
 ### synthesizers
+- reuse synths
 - % oversampling (e.g. 100 is same as original)
-
-### bugs
-- check logs
-- job for azure
-
-### methodology
-- bootstrap pre inference: identify a name and research past examples, draft justificationgit a
-- resource metrics
-- MIMIC dataset?
-- multi-class classification?
-- hyperparameter tuning?
-- bootstrap sed fix end (31)
-- mlp
 
 ## Abstract draft
 The increasing use of machine learning in healthcare has amplified concerns around the protection of sensitive patient information, particularly protected health information (PHI). Privacy-preserving approaches such as synthetic data generation and secure computation have emerged as promising solutions, yet their relative trade-offs in predictive performance and computational efficiency remain insufficiently characterized. In this work, we present a unified experimental framework for systematically comparing these approaches on tabular healthcare datasets.
