@@ -1,8 +1,0 @@
-# Synthcity reqs (issue with dlg and torch versions)
-numpy<2 # for the locked torch
-torch<2.3 # Max due to tsai, newest tsai not on conda # 2.4
-torchmetrics
-tsai==0.3.9
-xgboost <3.0.0
-opacus<1.5.4
-triton==2.0.0 # [linux]
