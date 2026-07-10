@@ -6,6 +6,7 @@ import logging
 from src.utils import load_config, inject_n_bits, model_n_bits
 from src.fhe_models import FHEModel, SUPPORTED_METRICS
 from src.resource_profiling import ResourceProfiler
+from src import bootstrap_utils
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +150,10 @@ def run(
                 profiler.start_memory_sampling(phase="inference")
 
                 import time as _time
-                start = _time.time()
-                metrics = model.evaluate(fhe=fhe_mode)
-                end = _time.time()
+                start   = _time.time()
+                y_pred  = model.predict(model.X_test, fhe=fhe_mode)
+                y_proba = model.predict_proba(model.X_test, fhe=fhe_mode)
+                end     = _time.time()
 
                 profiler.log_inference(end - start, len(model.X_test))
                 profiler.stop_memory_sampling()
@@ -160,37 +162,24 @@ def run(
                 complexity  = getattr(fhe_circuit, "complexity", None)
                 profiler.log_fhe(complexity=complexity)
 
+                metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
+                metrics = bootstrap_utils.compute_metrics(model.y_test, y_pred, y_proba, metric_names)
+
                 if n_bootstrap > 0:
-                    from pathlib import Path
-                    from src import bootstrap_utils
-                    metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
-
-                    predict_fn       = lambda X: model.predict(X, fhe=fhe_mode)
-                    predict_proba_fn = lambda X: model.predict_proba(X, fhe=fhe_mode)
-
-                    profiler.start_memory_sampling(phase="bootstrap_inference")
-                    iter_metrics, iter_times = bootstrap_utils.run_bootstrap(
-                        predict_fn=predict_fn,
-                        predict_proba_fn=predict_proba_fn,
-                        X_test=model.X_test, y_test=model.y_test,
+                    iter_results  = bootstrap_utils.run_bootstrap(
+                        y_true=model.y_test, y_pred=y_pred, y_proba=y_proba,
                         n=n_bootstrap, seed=bootstrap_seed, metric_names=metric_names,
                     )
-                    profiler.stop_memory_sampling()
+                    metrics_to_save = bootstrap_utils.to_metric_lists(iter_results)
+                else:
+                    metrics_to_save = metrics
 
-                    profiler.results["inference_time"] = {
-                        "total":      [t["total"]      for t in iter_times],
-                        "per_sample": [t["per_sample"] for t in iter_times],
-                    }
-
-                    metrics_path = (
-                        model.results_dir
-                        / f"{model.mode}__{model_name}__{dataset_name}__test__metrics.json"
-                    )
-                    bootstrap_utils.overwrite_metrics_with_bootstrap(
-                        path=metrics_path,
-                        metric_lists=bootstrap_utils.to_metric_lists(iter_metrics),
-                        n_bootstrap=n_bootstrap,
-                    )
+                bootstrap_utils.save_metrics_json(
+                    path=model.results_dir / f"{model.mode}__{model_name}__{dataset_name}__test__metrics.json",
+                    mode=model.mode, model_name=model_name, dataset_name=dataset_name,
+                    split="test", metrics=metrics_to_save, n_bootstrap=n_bootstrap,
+                    extra_fields={"fhe": fhe_mode, "n_bits": n_bits_for_model},
+                )
 
                 model_path = f"models/fhe_{n_bits_for_model}__{model_name}__{dataset_name}.json"
                 data_path  = f"data/processed/{dataset_name}.csv"

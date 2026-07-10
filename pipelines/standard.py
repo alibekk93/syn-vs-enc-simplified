@@ -2,10 +2,10 @@
 
 import logging
 import time
-from pathlib import Path
 from src.utils import load_config, require_device
 from src.models import Model, SUPPORTED_METRICS
 from src.resource_profiling import ResourceProfiler
+from src import bootstrap_utils
 
 logger = logging.getLogger(__name__)
 
@@ -84,39 +84,30 @@ def run(
                 profiler.start_memory_sampling(phase="inference")
 
                 start   = time.time()
-                metrics = model.evaluate()
+                y_pred  = model.predict(model.X_test)
+                y_proba = model.predict_proba(model.X_test)
                 end     = time.time()
 
                 profiler.log_inference(end - start, len(model.X_test))
                 profiler.stop_memory_sampling()
 
-                if n_bootstrap > 0:
-                    from src import bootstrap_utils
-                    metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
+                metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
+                metrics = bootstrap_utils.compute_metrics(model.y_test, y_pred, y_proba, metric_names)
 
-                    profiler.start_memory_sampling(phase="bootstrap_inference")
-                    iter_metrics, iter_times = bootstrap_utils.run_bootstrap(
-                        predict_fn=model.predict,
-                        predict_proba_fn=model.predict_proba,
-                        X_test=model.X_test, y_test=model.y_test,
+                if n_bootstrap > 0:
+                    iter_results  = bootstrap_utils.run_bootstrap(
+                        y_true=model.y_test, y_pred=y_pred, y_proba=y_proba,
                         n=n_bootstrap, seed=bootstrap_seed, metric_names=metric_names,
                     )
-                    profiler.stop_memory_sampling()
+                    metrics_to_save = bootstrap_utils.to_metric_lists(iter_results)
+                else:
+                    metrics_to_save = metrics
 
-                    profiler.results["inference_time"] = {
-                        "total":      [t["total"]      for t in iter_times],
-                        "per_sample": [t["per_sample"] for t in iter_times],
-                    }
-
-                    metrics_path = (
-                        model.results_dir
-                        / f"standard__{model_name}__{dataset_name}__test__metrics.json"
-                    )
-                    bootstrap_utils.overwrite_metrics_with_bootstrap(
-                        path=metrics_path,
-                        metric_lists=bootstrap_utils.to_metric_lists(iter_metrics),
-                        n_bootstrap=n_bootstrap,
-                    )
+                bootstrap_utils.save_metrics_json(
+                    path=model.results_dir / f"standard__{model_name}__{dataset_name}__test__metrics.json",
+                    mode="standard", model_name=model_name, dataset_name=dataset_name,
+                    split="test", metrics=metrics_to_save, n_bootstrap=n_bootstrap,
+                )
 
                 model_path = f"models/standard__{model_name}__{dataset_name}.joblib"
                 data_path  = f"data/processed/{dataset_name}.csv"
