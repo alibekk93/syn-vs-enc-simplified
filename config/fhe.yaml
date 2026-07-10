@@ -55,7 +55,7 @@ sweep:
 # A model compiled with device="cuda" cannot run on a non-GPU machine, so
 # leave this as "cpu" for local/dev work. Override per-run with
 # `run(device=...)` / `--device cuda` (see `main.py run-experiment` and
-# `run-single-bootstrap`) rather than editing this default, so the same
+# `run-single-internal-validation-bootstrap`) rather than editing this default, so the same
 # config still works for quick local testing.
 #
 # Startup fails fast with a clear error if "cuda" is requested but

@@ -1,4 +1,4 @@
-"""Bootstrap evaluation pipeline — resamples data and runs full experiment pipeline on each sample."""
+"""Internal validation bootstrap evaluation pipeline — resamples data and runs full experiment pipeline on each sample."""
 import gc
 import ctypes
 import logging
@@ -29,20 +29,20 @@ RESOURCE_CFG = "config/resource_profiling.yaml"
 SYNTH_CFG    = "config/synthesizers.yaml"
 
 
-def _bootstrap_dataframe(df: pd.DataFrame, seed: int) -> pd.DataFrame:
+def _internal_validation_bootstrap_dataframe(df: pd.DataFrame, seed: int) -> pd.DataFrame:
     """Resample dataframe with replacement (same size)."""
     return df.sample(n=len(df), replace=True, random_state=seed).reset_index(drop=True)
 
 
-def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
+def _create_internal_validation_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     """
-    Create bootstrap-specific configs for datasets, models, resource, synthesizers.
+    Create internal validation bootstrap-specific configs for datasets, models, resource, synthesizers.
 
     Returns:
         dict with keys: datasets, models, resource, synthesizers -> Path
     """
     # Create temporary directory for configs
-    tmp_dir = Path(f"tmp/bootstrap_configs/{seed}")
+    tmp_dir = Path(f"tmp/internal_validation_bootstrap_configs/{seed}")
     tmp_dir.mkdir(parents=True, exist_ok=True)
 
     # Load base configs
@@ -54,15 +54,15 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     # Modify datasets config: add raw_path and processed_path for each dataset.
     # Both paths are seed-namespaced so concurrent SLURM array tasks (different seeds,
     # same dataset) do not clobber each other's files.
-    bootstrap_raw_dir       = Path(f"data/bootstrap/{seed}")
-    bootstrap_processed_dir = Path(f"data/processed/{seed}")
-    bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
-    bootstrap_processed_dir.mkdir(parents=True, exist_ok=True)
+    internal_validation_bootstrap_raw_dir       = Path(f"data/internal_validation_bootstrap/{seed}")
+    internal_validation_bootstrap_processed_dir = Path(f"data/processed/{seed}")
+    internal_validation_bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
+    internal_validation_bootstrap_processed_dir.mkdir(parents=True, exist_ok=True)
 
     for ds_name in datasets:
         if ds_name in base_datasets:
-            base_datasets[ds_name]["raw_path"]       = str(bootstrap_raw_dir       / f"{ds_name}.csv")
-            base_datasets[ds_name]["processed_path"] = str(bootstrap_processed_dir / f"{ds_name}.csv")
+            base_datasets[ds_name]["raw_path"]       = str(internal_validation_bootstrap_raw_dir       / f"{ds_name}.csv")
+            base_datasets[ds_name]["processed_path"] = str(internal_validation_bootstrap_processed_dir / f"{ds_name}.csv")
         else:
             logger.warning(f"Dataset '{ds_name}' not found in base config; skipping raw_path override.")
 
@@ -71,20 +71,20 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     with open(dataset_config_path, 'w') as f:
         yaml.dump(base_datasets, f, default_flow_style=False)
 
-    # Modify models config: set output directories under bootstrap seed
+    # Modify models config: set output directories under internal validation bootstrap seed
     if "output" not in base_models:
         base_models["output"] = {}
-    base_models["output"]["results_dir"] = f"results/bootstrap/{seed}/metrics"
-    base_models["output"]["models_dir"]  = f"models/bootstrap/{seed}"
+    base_models["output"]["results_dir"] = f"results/internal_validation_bootstrap/{seed}/metrics"
+    base_models["output"]["models_dir"]  = f"models/internal_validation_bootstrap/{seed}"
 
     model_config_path = tmp_dir / "models.yaml"
     with open(model_config_path, 'w') as f:
         yaml.dump(base_models, f, default_flow_style=False)
 
-    # Modify resource config: set output_dir to bootstrap seed location
+    # Modify resource config: set output_dir to internal validation bootstrap seed location
     if "logging" not in base_resource:
         base_resource["logging"] = {}
-    base_resource["logging"]["output_dir"] = f"results/bootstrap/{seed}/resource_profiles"
+    base_resource["logging"]["output_dir"] = f"results/internal_validation_bootstrap/{seed}/resource_profiles"
 
     resource_config_path = tmp_dir / "resource_profiling.yaml"
     with open(resource_config_path, 'w') as f:
@@ -96,7 +96,7 @@ def _create_bootstrap_configs(seed: int, datasets: list[str]) -> dict:
     # Path(processed_path).parent / f"{synth}__{dataset}.csv", which matches.
     if "output" not in base_synth:
         base_synth["output"] = {}
-    base_synth["output"]["synthetic_dir"] = str(bootstrap_processed_dir)
+    base_synth["output"]["synthetic_dir"] = str(internal_validation_bootstrap_processed_dir)
 
     synth_config_path = tmp_dir / "synthesizers.yaml"
     with open(synth_config_path, 'w') as f:
@@ -122,18 +122,18 @@ def run(
     pipelines_cfg: dict | None = None,
 ) -> dict:
     """
-    Bootstrap evaluation pipeline that resamples data and runs full experiment pipeline.
+    Internal validation bootstrap evaluation pipeline that resamples data and runs full experiment pipeline.
 
-    Steps for each bootstrap iteration:
-        - Resample raw data with replacement (bootstrap sample)
-        - Save bootstrap sample to data/bootstrap/{seed}/{dataset}.csv
-        - Create dataset config pointing to bootstrap samples
-        - Create model config with output dirs under results/bootstrap/{seed} and models/bootstrap/{seed}
-        - Create resource config with output dir under results/bootstrap/{seed}/resource_profiles
-        - Run preprocessing on bootstrap sample
-        - Run standard modeling on preprocessed bootstrap sample
-        - Run synthetic modeling on preprocessed bootstrap sample
-        - Run FHE modeling on preprocessed bootstrap sample
+    Steps for each internal validation bootstrap iteration:
+        - Resample raw data with replacement (internal validation bootstrap sample)
+        - Save internal validation bootstrap sample to data/internal_validation_bootstrap/{seed}/{dataset}.csv
+        - Create dataset config pointing to internal validation bootstrap samples
+        - Create model config with output dirs under results/internal_validation_bootstrap/{seed} and models/internal_validation_bootstrap/{seed}
+        - Create resource config with output dir under results/internal_validation_bootstrap/{seed}/resource_profiles
+        - Run preprocessing on internal validation bootstrap sample
+        - Run standard modeling on preprocessed internal validation bootstrap sample
+        - Run synthetic modeling on preprocessed internal validation bootstrap sample
+        - Run FHE modeling on preprocessed internal validation bootstrap sample
         - Collect and store metrics
 
     Args:
@@ -141,12 +141,12 @@ def run(
         models:   List of model names to use. If None, all models from config are used.
         synthesizers: List of synthesizer names to use. If None, all synthesizers
             from config are used.
-        seed:     Random seed for bootstrap sampling.
+        seed:     Random seed for internal validation bootstrap sampling.
         evaluation: Optional evaluation configuration (not currently used).
         n_bits: Override n_bits for every FHE model (passed straight through to
             `fhe.run`). Lets the FHE stage of a given seed be parallelized across
             n_bits values as separate processes — see `main.py`'s
-            `run-single-bootstrap --n-bits N` and `list-n-bits`.
+            `run-single-internal-validation-bootstrap --n-bits N` and `list-n-bits`.
         device: Override the compute device ("cpu" or "cuda"), passed straight
             through to `standard.run`, `synthetic.run`, and `fhe.run`. Each
             pipeline applies it only to the models/synthesizers that actually
@@ -167,12 +167,12 @@ def run(
     targets_models   = models   or [m["name"] for m in load_config(MODELS_CFG).get("models", [])]
 
     logger.info(
-        f"Bootstrap pipeline started — datasets: {targets_datasets}, "
+        f"Internal validation bootstrap pipeline started — datasets: {targets_datasets}, "
         f"models: {targets_models}, seed: {seed}"
     )
 
-    # Create bootstrap-specific configs
-    configs = _create_bootstrap_configs(seed, targets_datasets)
+    # Create internal validation bootstrap-specific configs
+    configs = _create_internal_validation_bootstrap_configs(seed, targets_datasets)
     logger.info(f"Using dataset config: {configs['datasets']}")
     logger.info(f"Using models config: {configs['models']}")
     logger.info(f"Using resource config: {configs['resource']}")
@@ -193,22 +193,22 @@ def run(
         df_original = pd.read_csv(raw_path)
         logger.info(f"Loaded original raw data for {dataset_name}: {df_original.shape}")
 
-        # Create bootstrap sample
-        df_boot = _bootstrap_dataframe(df_original, seed)
-        logger.info(f"Created bootstrap sample for {dataset_name}: {df_boot.shape}")
+        # Create internal validation bootstrap sample
+        df_boot = _internal_validation_bootstrap_dataframe(df_original, seed)
+        logger.info(f"Created internal validation bootstrap sample for {dataset_name}: {df_boot.shape}")
 
-        # Save bootstrap sample to the designated location
-        bootstrap_raw_dir = Path(f"data/bootstrap/{seed}")
-        bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
-        bootstrap_raw_path = bootstrap_raw_dir / f"{dataset_name}.csv"
-        df_boot.to_csv(bootstrap_raw_path, index=False)
-        logger.info(f"Saved bootstrap sample to {bootstrap_raw_path}")
+        # Save internal validation bootstrap sample to the designated location
+        internal_validation_bootstrap_raw_dir = Path(f"data/internal_validation_bootstrap/{seed}")
+        internal_validation_bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
+        internal_validation_bootstrap_raw_path = internal_validation_bootstrap_raw_dir / f"{dataset_name}.csv"
+        df_boot.to_csv(internal_validation_bootstrap_raw_path, index=False)
+        logger.info(f"Saved internal validation bootstrap sample to {internal_validation_bootstrap_raw_path}")
 
         try:
             prep_results, std_results, synth_results, fhe_results = {}, {}, {}, {}
 
             if pipelines_cfg.get("preprocessing"):
-                logger.info(f"Running preprocessing on bootstrap sample for {dataset_name}")
+                logger.info(f"Running preprocessing on internal validation bootstrap sample for {dataset_name}")
                 from pipelines import preprocessing
                 prep_results = preprocessing.run(
                     datasets=[dataset_name],
@@ -217,7 +217,7 @@ def run(
                 )
 
             if pipelines_cfg.get("raw"):
-                logger.info(f"Running standard modeling on bootstrap sample for {dataset_name}")
+                logger.info(f"Running standard modeling on internal validation bootstrap sample for {dataset_name}")
                 from pipelines import standard
                 std_results = standard.run(
                     datasets=[dataset_name],
@@ -229,7 +229,7 @@ def run(
                 )
 
             if pipelines_cfg.get("synthetic"):
-                logger.info(f"Running synthetic modeling on bootstrap sample for {dataset_name}")
+                logger.info(f"Running synthetic modeling on internal validation bootstrap sample for {dataset_name}")
                 from pipelines import synthetic
                 synth_results = synthetic.run(
                     datasets=[dataset_name],
@@ -243,7 +243,7 @@ def run(
                 )
 
             if pipelines_cfg.get("fhe"):
-                logger.info(f"Running FHE modeling on bootstrap sample for {dataset_name}")
+                logger.info(f"Running FHE modeling on internal validation bootstrap sample for {dataset_name}")
                 from pipelines import fhe
                 fhe_results = fhe.run(
                     datasets=[dataset_name],
@@ -269,10 +269,10 @@ def run(
                 "fhe": fhe_results.get(dataset_name, {}),
             }
 
-            logger.info(f"Completed bootstrap iteration for {dataset_name} with seed {seed}")
+            logger.info(f"Completed internal validation bootstrap iteration for {dataset_name} with seed {seed}")
 
         except Exception as e:
-            logger.error(f"Failed running experiment pipeline on bootstrap sample for {dataset_name}: {e}")
+            logger.error(f"Failed running experiment pipeline on internal validation bootstrap sample for {dataset_name}: {e}")
             results[dataset_name][seed] = {
                 "error": str(e),
                 "preprocessing": {},
@@ -281,9 +281,9 @@ def run(
                 "fhe": {},
             }
 
-        # Optionally remove the bootstrap sample after processing to save space?
+        # Optionally remove the internal validation bootstrap sample after processing to save space?
         # Keep it for potential inspection; but we can comment out removal.
-        # bootstrap_raw_path.unlink(missing_ok=True)
+        # internal_validation_bootstrap_raw_path.unlink(missing_ok=True)
 
-    logger.info("Bootstrap pipeline complete.")
+    logger.info("Internal validation bootstrap pipeline complete.")
     return results

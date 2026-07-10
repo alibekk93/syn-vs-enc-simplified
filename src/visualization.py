@@ -171,7 +171,7 @@ def plot_performance(df, metric, save_dir="results/figures"):
         x="model",
         y=metric,
         hue="mode_pretty",
-        errorbar=None   # to be updated when bootstrap is available
+        errorbar=None   # to be updated when internal validation bootstrap is available
     )
 
     title = f"{format_metric_name(metric)} Comparison"
@@ -363,11 +363,11 @@ def plot_fhe_ablation(df, metric, save_dir=FIGURES_DIR):
 
 
 # ===========================================================
-# BOOTSTRAP DATA LOADING
+# INTERNAL VALIDATION BOOTSTRAP DATA LOADING
 # ===========================================================
 
-def load_bootstrap(path="results/bootstrap/aggregated.json"):
-    """Flatten aggregated bootstrap JSON into a merged DataFrame (test split only for metrics)."""
+def load_internal_validation_bootstrap(path="results/internal_validation_bootstrap/aggregated.json"):
+    """Flatten aggregated internal validation bootstrap JSON into a merged DataFrame (test split only for metrics)."""
     with open(path) as f:
         data = json.load(f)
 
@@ -551,7 +551,7 @@ def _build_mode_display(cfg, raw_keys):
 
 
 # ===========================================================
-# BOXPLOTS (BOOTSTRAP)
+# BOXPLOTS (INTERNAL VALIDATION BOOTSTRAP)
 # ===========================================================
 
 def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True):
@@ -712,13 +712,13 @@ def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg):
 
 
 def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
-                    bootstrap_path="results/bootstrap/aggregated.json",
+                    internal_validation_bootstrap_path="results/internal_validation_bootstrap/aggregated.json",
                     viz_cfg_path="config/visualization.yaml"):
     """
-    Violin plot of bootstrap distributions for one dataset / model / metric combination.
+    Violin plot of internal validation bootstrap distributions for one dataset / model / metric combination.
 
     x-axis  : modes (Real · Gaussian Copula · CTGAN · FHE N-bit), grouped and colored
-    y-axis  : metric value across bootstrap seeds
+    y-axis  : metric value across internal validation bootstrap seeds
 
     Pass pre-loaded df and cfg to avoid repeated I/O when called in a loop.
     """
@@ -736,7 +736,7 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
         save_dir = Path(fig_cfg["dir"])
 
     if df is None:
-        df = load_bootstrap(bootstrap_path)
+        df = load_internal_validation_bootstrap(internal_validation_bootstrap_path)
 
     df = df.copy()
     df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
@@ -790,13 +790,13 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
 
 def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
-                 bootstrap_path="results/bootstrap/aggregated.json",
+                 internal_validation_bootstrap_path="results/internal_validation_bootstrap/aggregated.json",
                  viz_cfg_path="config/visualization.yaml"):
     """
-    Boxplot of bootstrap distributions for one dataset / model / metric combination.
+    Boxplot of internal validation bootstrap distributions for one dataset / model / metric combination.
 
     x-axis  : modes (Real · Gaussian Copula · CTGAN · FHE N-bit), grouped and colored
-    y-axis  : metric value across bootstrap seeds
+    y-axis  : metric value across internal validation bootstrap seeds
 
     Pass pre-loaded df and cfg to avoid repeated I/O when called in a loop.
     """
@@ -814,7 +814,7 @@ def plot_boxplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
         save_dir = Path(fig_cfg["dir"])
 
     if df is None:
-        df = load_bootstrap(bootstrap_path)
+        df = load_internal_validation_bootstrap(internal_validation_bootstrap_path)
 
     df = df.copy()
     df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
@@ -1086,7 +1086,7 @@ def generate_all_figures():
     cfg = _load_viz_config()
     metrics = cfg.get("metrics", [])
 
-    df = load_bootstrap()
+    df = load_internal_validation_bootstrap()
     df = df.dropna(how="all")
     available_cols = set(df.columns)
 

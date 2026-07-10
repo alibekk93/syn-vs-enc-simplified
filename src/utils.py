@@ -111,14 +111,14 @@ def generate_seeds(seed: int, length: int):
     """Generate a list of random seeds and save to file."""
     random.seed(seed)
     seeds = [random.randint(0, 2**32 - 1) for _ in range(length)]
-    with open("bootstrap_seeds.txt", "w") as f:
+    with open("internal_validation_bootstrap_seeds.txt", "w") as f:
         for s in seeds:
             f.write(f"{s}\n")
-    logger.info(f"Generated {length} seeds and saved to bootstrap_seeds.txt")
+    logger.info(f"Generated {length} seeds and saved to internal_validation_bootstrap_seeds.txt")
 
 
-def aggregate_bootstrap(results_dir: str = "results/bootstrap", output_path: str = "results/bootstrap/aggregated.json"):
-    """Concatenate all bootstrap results into a single hierarchical JSON file.
+def aggregate_internal_validation_bootstrap(results_dir: str = "results/internal_validation_bootstrap", output_path: str = "results/internal_validation_bootstrap/aggregated.json"):
+    """Concatenate all internal validation bootstrap results into a single hierarchical JSON file.
 
     Output structure:
         {metrics|resource_profiles} -> mode -> model -> dataset -> [per-seed records]
@@ -189,4 +189,4 @@ def aggregate_bootstrap(results_dir: str = "results/bootstrap", output_path: str
     output_file = Path(output_path)
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(output, indent=2), encoding="utf-8")
-    logger.info(f"Aggregated bootstrap results saved to {output_path}")
+    logger.info(f"Aggregated internal validation bootstrap results saved to {output_path}")

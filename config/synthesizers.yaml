@@ -29,7 +29,7 @@
 #   synthesizers.py (ctgan, nflow, arf). gaussian_copula (statistical) and
 #   bayesian_network (pgmpy structure search) have no GPU path and ignore
 #   this setting. Override per-run with `--device cuda` (see
-#   `main.py run-experiment` / `run-single-bootstrap`) rather than editing
+#   `main.py run-experiment` / `run-single-internal-validation-bootstrap`) rather than editing
 #   this default, so the same config still works for local/CPU-only runs.
 #
 # ADDING A NEW METHOD:

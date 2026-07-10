@@ -4,7 +4,7 @@ Main entry point with subcommands.
 Usage:
     python main.py run-experiment --config config/main.yaml
     python main.py run-experiment --config config/main.yaml --n-bits 4
-    python main.py run-single-bootstrap --config config/main.yaml --seed 42
+    python main.py run-single-internal-validation-bootstrap --config config/main.yaml --seed 42
     python main.py list-n-bits
     python main.py create-visuals
 """
@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from src.utils import load_config, aggregate_bootstrap
+from src.utils import load_config, aggregate_internal_validation_bootstrap
 
 
 # --------------------------------------------------
@@ -102,7 +102,7 @@ def run_experiment(config_path: str, n_bits: int | None = None, device: str | No
     logger.info("=== Experiment complete ===")
 
 
-def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None, device: str | None = None):
+def run_single_internal_validation_bootstrap(config_path: str, seed: int, n_bits: int | None = None, device: str | None = None):
     check_torch()
     set_seed(seed)
 
@@ -114,12 +114,12 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
     pipelines_cfg = cfg.get("pipelines", {})
 
     logger.info(
-        f"=== Running single bootstrap "
+        f"=== Running single internal validation bootstrap "
         f"(config: {config_path}, seed: {seed}) ==="
     )
 
-    from pipelines import bootstrap
-    bootstrap.run(
+    from pipelines import internal_validation_bootstrap
+    internal_validation_bootstrap.run(
         datasets=datasets,
         models=models,
         synthesizers=synthesizers,
@@ -130,7 +130,7 @@ def run_single_bootstrap(config_path: str, seed: int, n_bits: int | None = None,
         pipelines_cfg=pipelines_cfg,
     )
 
-    logger.info("=== Single bootstrap run complete ===")
+    logger.info("=== Single internal validation bootstrap run complete ===")
 
 
 def verify_gpu(venv: str, device: str = "cuda"):
@@ -155,9 +155,9 @@ def create_visuals():
     logger.info("=== Visualization complete ===")
 
 
-def aggregate_bootstrap_results(results_dir: str, output_path: str):
-    logger.info("=== Aggregating bootstrap results ===")
-    aggregate_bootstrap(results_dir=results_dir, output_path=output_path)
+def aggregate_internal_validation_bootstrap_results(results_dir: str, output_path: str):
+    logger.info("=== Aggregating internal validation bootstrap results ===")
+    aggregate_internal_validation_bootstrap(results_dir=results_dir, output_path=output_path)
     logger.info("=== Aggregation complete ===")
 
 
@@ -167,10 +167,10 @@ def generate_seeds(seed: int, length: int):
     # Generate list of integers in a large range, e.g., 0 to 2**32 - 1
     seeds = [random.randint(0, 2**32 - 1) for _ in range(length)]
     # Write to file, one per line
-    with open("bootstrap_seeds.txt", "w") as f:
+    with open("internal_validation_bootstrap_seeds.txt", "w") as f:
         for s in seeds:
             f.write(f"{s}\n")
-    logger.info(f"Generated {length} seeds and saved to bootstrap_seeds.txt")
+    logger.info(f"Generated {length} seeds and saved to internal_validation_bootstrap_seeds.txt")
 
 
 def list_n_bits(config_path: str, out_path: str):
@@ -236,10 +236,10 @@ if __name__ == "__main__":
              "CUDA-enabled PyTorch install."
     )
 
-    # ---- run-single-bootstrap ----
+    # ---- run-single-internal-validation-bootstrap ----
     bootstrap_parser = subparsers.add_parser(
-        "run-single-bootstrap",
-        help="Run a single bootstrap evaluation on existing models"
+        "run-single-internal-validation-bootstrap",
+        help="Run a single internal validation bootstrap evaluation on existing models"
     )
     bootstrap_parser.add_argument(
         "--config",
@@ -257,7 +257,7 @@ if __name__ == "__main__":
         type=int,
         default=None,
         help="Override n_bits for every FHE model (default: per-model values in config/fhe.yaml). "
-             "Run once per (seed, n_bits) pair, in parallel, to sweep n_bits within bootstrap."
+             "Run once per (seed, n_bits) pair, in parallel, to sweep n_bits within internal validation bootstrap."
     )
     bootstrap_parser.add_argument(
         "--device",
@@ -298,26 +298,26 @@ if __name__ == "__main__":
              "the check correctly reports GPU NOT used."
     )
 
-    # ---- aggregate-bootstrap ----
+    # ---- aggregate-internal-validation-bootstrap ----
     aggregate_parser = subparsers.add_parser(
-        "aggregate-bootstrap",
-        help="Aggregate per-seed bootstrap results into a single JSON file"
+        "aggregate-internal-validation-bootstrap",
+        help="Aggregate per-seed internal validation bootstrap results into a single JSON file"
     )
     aggregate_parser.add_argument(
         "--results-dir",
-        default="results/bootstrap",
-        help="Directory containing per-seed bootstrap result subdirectories (default: results/bootstrap)"
+        default="results/internal_validation_bootstrap",
+        help="Directory containing per-seed internal validation bootstrap result subdirectories (default: results/internal_validation_bootstrap)"
     )
     aggregate_parser.add_argument(
         "--output",
-        default="results/bootstrap/aggregated.json",
-        help="Path to write the aggregated JSON file (default: results/bootstrap/aggregated.json)"
+        default="results/internal_validation_bootstrap/aggregated.json",
+        help="Path to write the aggregated JSON file (default: results/internal_validation_bootstrap/aggregated.json)"
     )
 
     # ---- generate-seeds ----
     seeds_parser = subparsers.add_parser(
         "generate-seeds",
-        help="Generate a list of random seeds for bootstrap sampling"
+        help="Generate a list of random seeds for internal validation bootstrap sampling"
     )
     seeds_parser.add_argument(
         "--seed",
@@ -369,8 +369,8 @@ if __name__ == "__main__":
     if args.command == "run-experiment":
         run_experiment(args.config, args.n_bits, args.device)
 
-    elif args.command == "run-single-bootstrap":
-        run_single_bootstrap(args.config, args.seed, args.n_bits, args.device)
+    elif args.command == "run-single-internal-validation-bootstrap":
+        run_single_internal_validation_bootstrap(args.config, args.seed, args.n_bits, args.device)
 
     elif args.command == "create-visuals":
         create_visuals()
@@ -378,8 +378,8 @@ if __name__ == "__main__":
     elif args.command == "verify-gpu":
         verify_gpu(args.venv, args.device)
 
-    elif args.command == "aggregate-bootstrap":
-        aggregate_bootstrap_results(args.results_dir, args.output)
+    elif args.command == "aggregate-internal-validation-bootstrap":
+        aggregate_internal_validation_bootstrap_results(args.results_dir, args.output)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)

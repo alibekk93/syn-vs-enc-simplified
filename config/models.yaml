@@ -31,7 +31,7 @@
 #   (currently xgboost). logistic_regression/random_forest/svm/mlp are
 #   plain scikit-learn with no GPU path and ignore this setting. Override
 #   per-run with `--device cuda` (see `main.py run-experiment` /
-#   `run-single-bootstrap`) rather than editing this default, so the same
+#   `run-single-internal-validation-bootstrap`) rather than editing this default, so the same
 #   config still works for local/CPU-only runs.
 #
 # =============================================================================
