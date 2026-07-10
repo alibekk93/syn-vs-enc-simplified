@@ -1,0 +1,18 @@
+# =============================================================================
+# bootstrap.yaml — Bootstrap Evaluation Configuration
+# =============================================================================
+#
+# Controls the simple bootstrap that runs as part of run-experiment when
+# `bootstrap: true` is set in the experiment config.
+#
+# Workflow: fit model once → evaluate on real test set → resample test set
+# N times with replacement → store per-iteration metrics as lists in the
+# existing results/metrics and results/resource_profiles JSON files.
+#
+# n      Number of bootstrap iterations (default: 1000)
+# seed   Random seed for bootstrap resampling (default: 42)
+#
+# =============================================================================
+
+n:    1000
+seed: 42

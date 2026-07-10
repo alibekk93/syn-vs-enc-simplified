@@ -20,3 +20,5 @@ pipelines:
   raw:           false
   synthetic:     false
   fhe:           true
+
+bootstrap: false

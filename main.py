@@ -26,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 from src.utils import load_config, aggregate_internal_validation_bootstrap
 
+BOOTSTRAP_CFG = "config/bootstrap.yaml"
+
 
 # --------------------------------------------------
 # Utilities
@@ -71,6 +73,11 @@ def run_experiment(config_path: str, n_bits: int | None = None, device: str | No
     fhe_mode     = cfg.get("fhe_mode", "simulate")
     pipelines_cfg = cfg.get("pipelines", {})
 
+    bootstrap_enabled = cfg.get("bootstrap", False)
+    bootstrap_cfg     = load_config(BOOTSTRAP_CFG) if bootstrap_enabled else {}
+    n_bootstrap       = bootstrap_cfg.get("n", 0)
+    bootstrap_seed    = bootstrap_cfg.get("seed", 42)
+
     logger.info(f"=== Starting full pipeline (config: {config_path}) ===")
 
     if pipelines_cfg.get("preprocessing"):
@@ -81,12 +88,14 @@ def run_experiment(config_path: str, n_bits: int | None = None, device: str | No
     if pipelines_cfg.get("raw"):
         logger.info("=== Raw ===")
         from pipelines import standard
-        standard.run(datasets=datasets, models=models, device=device)
+        standard.run(datasets=datasets, models=models, device=device,
+                     n_bootstrap=n_bootstrap, bootstrap_seed=bootstrap_seed)
 
     if pipelines_cfg.get("synthetic"):
         logger.info("=== Synthetic ===")
         from pipelines import synthetic
-        synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models, device=device)
+        synthetic.run(datasets=datasets, synthesizers=synthesizers, models=models, device=device,
+                      n_bootstrap=n_bootstrap, bootstrap_seed=bootstrap_seed)
 
     if pipelines_cfg.get("fhe"):
         logger.info("=== FHE ===")
@@ -97,6 +106,8 @@ def run_experiment(config_path: str, n_bits: int | None = None, device: str | No
             fhe_mode=fhe_mode,
             n_bits=n_bits,
             device=device,
+            n_bootstrap=n_bootstrap,
+            bootstrap_seed=bootstrap_seed,
         )
 
     logger.info("=== Experiment complete ===")

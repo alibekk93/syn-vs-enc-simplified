@@ -2,9 +2,10 @@
 
 import logging
 import time
+from pathlib import Path
 from src.utils import load_config, require_device
 from src.synthesizers import Synthesizer
-from src.models import Model
+from src.models import Model, SUPPORTED_METRICS
 from src.resource_profiling import ResourceProfiler
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,8 @@ def run(
     oversampling_factors: list[int] | None = None,
     skip_training:        bool = False,
     device: str | None = None,
+    n_bootstrap: int = 0,
+    bootstrap_seed: int = 42,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
     models_config: str = "config/models.yaml",
@@ -161,6 +164,34 @@ def run(
 
                                 train_profiler.log_inference(end - start, len(model.X_test))
                                 train_profiler.stop_memory_sampling()
+
+                                if n_bootstrap > 0:
+                                    from src import bootstrap_utils
+                                    metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
+
+                                    train_profiler.start_memory_sampling(phase="bootstrap_inference")
+                                    iter_metrics, iter_times = bootstrap_utils.run_bootstrap(
+                                        predict_fn=model.predict,
+                                        predict_proba_fn=model.predict_proba,
+                                        X_test=model.X_test, y_test=model.y_test,
+                                        n=n_bootstrap, seed=bootstrap_seed, metric_names=metric_names,
+                                    )
+                                    train_profiler.stop_memory_sampling()
+
+                                    train_profiler.results["inference_time"] = {
+                                        "total":      [t["total"]      for t in iter_times],
+                                        "per_sample": [t["per_sample"] for t in iter_times],
+                                    }
+
+                                    metrics_path = (
+                                        model.results_dir
+                                        / f"{effective_name}__{model_name}__{dataset_name}__test__metrics.json"
+                                    )
+                                    bootstrap_utils.overwrite_metrics_with_bootstrap(
+                                        path=metrics_path,
+                                        metric_lists=bootstrap_utils.to_metric_lists(iter_metrics),
+                                        n_bootstrap=n_bootstrap,
+                                    )
 
                                 model_path = f"models/{effective_name}__{model_name}__{dataset_name}.joblib"
                                 data_path  = f"data/processed/{synthetic_dataset}.csv"

@@ -4,7 +4,7 @@ import gc
 import ctypes
 import logging
 from src.utils import load_config, inject_n_bits, model_n_bits
-from src.fhe_models import FHEModel
+from src.fhe_models import FHEModel, SUPPORTED_METRICS
 from src.resource_profiling import ResourceProfiler
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,8 @@ def run(
     n_bits: int | None = None,
     device: str | None = None,
     fhe_config_override=None,
+    n_bootstrap: int = 0,
+    bootstrap_seed: int = 42,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
     models_config: str = "config/models.yaml",
@@ -157,6 +159,38 @@ def run(
                 fhe_circuit = getattr(model.model, "fhe_circuit", None)
                 complexity  = getattr(fhe_circuit, "complexity", None)
                 profiler.log_fhe(complexity=complexity)
+
+                if n_bootstrap > 0:
+                    from pathlib import Path
+                    from src import bootstrap_utils
+                    metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
+
+                    predict_fn       = lambda X: model.predict(X, fhe=fhe_mode)
+                    predict_proba_fn = lambda X: model.predict_proba(X, fhe=fhe_mode)
+
+                    profiler.start_memory_sampling(phase="bootstrap_inference")
+                    iter_metrics, iter_times = bootstrap_utils.run_bootstrap(
+                        predict_fn=predict_fn,
+                        predict_proba_fn=predict_proba_fn,
+                        X_test=model.X_test, y_test=model.y_test,
+                        n=n_bootstrap, seed=bootstrap_seed, metric_names=metric_names,
+                    )
+                    profiler.stop_memory_sampling()
+
+                    profiler.results["inference_time"] = {
+                        "total":      [t["total"]      for t in iter_times],
+                        "per_sample": [t["per_sample"] for t in iter_times],
+                    }
+
+                    metrics_path = (
+                        model.results_dir
+                        / f"{model.mode}__{model_name}__{dataset_name}__test__metrics.json"
+                    )
+                    bootstrap_utils.overwrite_metrics_with_bootstrap(
+                        path=metrics_path,
+                        metric_lists=bootstrap_utils.to_metric_lists(iter_metrics),
+                        n_bootstrap=n_bootstrap,
+                    )
 
                 model_path = f"models/fhe_{n_bits_for_model}__{model_name}__{dataset_name}.json"
                 data_path  = f"data/processed/{dataset_name}.csv"
