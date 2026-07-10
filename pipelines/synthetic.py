@@ -25,10 +25,11 @@ def _log_section(title: str) -> None:
 
 
 def run(
-    datasets:      list[str] | None = None,
-    synthesizers:  list[str] | None = None,
-    models:        list[str] | None = None,
-    skip_training: bool = False,
+    datasets:             list[str] | None = None,
+    synthesizers:         list[str] | None = None,
+    models:               list[str] | None = None,
+    oversampling_factors: list[int] | None = None,
+    skip_training:        bool = False,
     device: str | None = None,
     datasets_config: str = "config/datasets.yaml",
     resource_config: str = "config/resource_profiling.yaml",
@@ -37,9 +38,14 @@ def run(
 ) -> dict:
     """
     Args:
-        datasets:      List of dataset names (default: all).
-        synthesizers:  List of synthesizer names (default: all in config).
-        models:        List of model names (default: all in config).
+        datasets:             List of dataset names (default: all).
+        synthesizers:         List of synthesizer names (default: all in config).
+        models:               List of model names (default: all in config).
+        oversampling_factors: Percentages of original dataset size to sample
+            (default: synthesizers.yaml `oversampling.factors`, e.g. [100, 150, 300]).
+            Each synthesizer is fit once per dataset then sampled at every factor.
+            Results and output files include the factor in the synthesizer name,
+            e.g. "arf_100", "arf_150", "arf_300".
         skip_training: If True, only synthesize data without training models.
         device: "cpu" or "cuda" (default: synthesizers.yaml's `device`). Used
             for both synthesis (ctgan/nflow/arf only) and the downstream
@@ -52,18 +58,23 @@ def run(
         synthesizers_config: Path to synthesizers configuration file.
 
     Returns:
-        Nested dict of {dataset: {synthesizer: {model: metrics}}}
+        Nested dict of {dataset: {synthesizer_factor: {model: metrics}}}
+        where synthesizer_factor is e.g. "arf_100", "arf_150".
     """
-    targets_datasets     = datasets     or list(load_config(datasets_config).keys())
-    targets_synthesizers = synthesizers or [k for k in load_config(synthesizers_config).get("methods", [])]
-    targets_models       = models       or [m["name"] for m in load_config(models_config).get("models", [])]
+    synth_cfg_all = load_config(synthesizers_config)
 
-    active_device = device or load_config(synthesizers_config).get("device", "cpu")
+    targets_datasets     = datasets             or list(load_config(datasets_config).keys())
+    targets_synthesizers = synthesizers         or [k for k in synth_cfg_all.get("methods", [])]
+    targets_models       = models               or [m["name"] for m in load_config(models_config).get("models", [])]
+    targets_factors      = oversampling_factors or list(synth_cfg_all.get("oversampling", {}).get("factors", [100]))
+
+    active_device = device or synth_cfg_all.get("device", "cpu")
     require_device(active_device)
 
     logger.debug(
         f"Synthetic pipeline started — datasets: {targets_datasets}, "
-        f"synthesizers: {targets_synthesizers}, models: {targets_models}, device: {active_device}"
+        f"synthesizers: {targets_synthesizers}, models: {targets_models}, "
+        f"oversampling_factors: {targets_factors}, device: {active_device}"
     )
 
     results = {}
@@ -72,94 +83,119 @@ def run(
 
         for dataset_name in targets_datasets:
             results.setdefault(dataset_name, {})
-            results[dataset_name][synth_name] = {}
 
-            logger.info(f"--- Synthesizing: {synth_name} on {dataset_name} ---")
+            logger.info(f"--- Fitting: {synth_name} on {dataset_name} ---")
 
-            # Create profiler before the try block.
+            # Profiler for the fit phase (shared across all factors).
             synth_profiler = ResourceProfiler(load_config(resource_config))
 
             try:
                 synth = Synthesizer(synth_name, cfg=synthesizers_config, device=active_device)
 
-                # Explicit phase label.
                 synth_profiler.start_memory_sampling(phase="synthesis")
 
                 with synth_profiler.time_block("synthesis_load"):
                     synth.load_data(dataset_name, dataset_cfg=datasets_config)
                 with synth_profiler.time_block("synthesis_fit"):
                     synth.fit()
-                with synth_profiler.time_block("synthesis_sample"):
-                    synth.sample()
+                with synth_profiler.time_block("synthesis_save"):
                     synth.save()
 
                 synth_profiler.stop_memory_sampling()
                 synth_profiler.save(f"{synth_name}__synthesis__{dataset_name}")
 
-                if skip_training:
-                    results[dataset_name][synth_name] = {
-                        "synthesis": synth_profiler.export()
-                    }
-                    continue
+                for factor in targets_factors:
+                    effective_name = f"{synth_name}_{factor}"
+                    results[dataset_name][effective_name] = {}
 
-                synthetic_dataset = f"{synth_name}__{dataset_name}"
-                for model_name in targets_models:
-                    logger.info(f"--- {model_name} on synthetic {synthetic_dataset} ---")
+                    logger.info(f"--- Sampling: {effective_name} on {dataset_name} ---")
 
-                    # Create per-model profiler before the inner try block.
-                    train_profiler = ResourceProfiler(load_config(resource_config))
+                    # Per-factor profiler covers only the sampling step.
+                    factor_profiler = ResourceProfiler(load_config(resource_config))
 
                     try:
-                        model = Model(model_name, cfg=models_config, mode=synth_name, device=active_device)
+                        factor_profiler.start_memory_sampling(phase="sampling")
 
-                        # Explicit phase labels.
-                        train_profiler.start_memory_sampling(phase="training")
+                        n_rows = int(synth.n_rows_original * factor / 100)
+                        with factor_profiler.time_block("synthesis_sample"):
+                            synth.sample(num_rows=n_rows, oversampling_factor=factor)
 
-                        with train_profiler.time_block("data_loading"):
-                            model.load_data(synthetic_dataset, dataset_cfg=datasets_config)
-                            model.save_dataset_name = dataset_name
-                            model.use_all_as_train()
-                            model.load_test_data(dataset_name, dataset_cfg=datasets_config)
+                        factor_profiler.stop_memory_sampling()
+                        factor_profiler.save(f"{effective_name}__sampling__{dataset_name}")
 
-                        with train_profiler.time_block("training"):
-                            model.train()
-
-                        train_profiler.stop_memory_sampling()
-
-                        train_profiler.start_memory_sampling(phase="inference")
-
-                        start   = time.time()
-                        metrics = model.evaluate()
-                        end     = time.time()
-
-                        train_profiler.log_inference(end - start, len(model.X_test))
-                        train_profiler.stop_memory_sampling()
-
-                        model_path = f"models/{synth_name}__{model_name}__{dataset_name}.joblib"
-                        data_path  = f"data/processed/{synthetic_dataset}.csv"
-                        train_profiler.log_storage(model_path=model_path, data_path=data_path)
-
-                        results[dataset_name][synth_name][model_name] = {
-                            "metrics":   metrics,
-                            "profiling": {
+                        if skip_training:
+                            results[dataset_name][effective_name] = {
                                 "synthesis": synth_profiler.export(),
-                                "training":  train_profiler.export(),
-                            },
-                        }
+                                "sampling":  factor_profiler.export(),
+                            }
+                            continue
 
-                        # Persist profiling results to disk.
-                        train_profiler.save(
-                            f"{synth_name}__{model_name}__{dataset_name}"
-                        )
+                        synthetic_dataset = f"{effective_name}__{dataset_name}"
+                        for model_name in targets_models:
+                            logger.info(f"--- {model_name} on synthetic {synthetic_dataset} ---")
+
+                            # Create per-model profiler before the inner try block.
+                            train_profiler = ResourceProfiler(load_config(resource_config))
+
+                            try:
+                                model = Model(model_name, cfg=models_config, mode=effective_name, device=active_device)
+
+                                train_profiler.start_memory_sampling(phase="training")
+
+                                with train_profiler.time_block("data_loading"):
+                                    model.load_data(synthetic_dataset, dataset_cfg=datasets_config)
+                                    model.save_dataset_name = dataset_name
+                                    model.use_all_as_train()
+                                    model.load_test_data(dataset_name, dataset_cfg=datasets_config)
+
+                                with train_profiler.time_block("training"):
+                                    model.train()
+
+                                train_profiler.stop_memory_sampling()
+
+                                train_profiler.start_memory_sampling(phase="inference")
+
+                                start   = time.time()
+                                metrics = model.evaluate()
+                                end     = time.time()
+
+                                train_profiler.log_inference(end - start, len(model.X_test))
+                                train_profiler.stop_memory_sampling()
+
+                                model_path = f"models/{effective_name}__{model_name}__{dataset_name}.joblib"
+                                data_path  = f"data/processed/{synthetic_dataset}.csv"
+                                train_profiler.log_storage(model_path=model_path, data_path=data_path)
+
+                                results[dataset_name][effective_name][model_name] = {
+                                    "metrics":   metrics,
+                                    "profiling": {
+                                        "synthesis": synth_profiler.export(),
+                                        "sampling":  factor_profiler.export(),
+                                        "training":  train_profiler.export(),
+                                    },
+                                }
+
+                                train_profiler.save(
+                                    f"{effective_name}__{model_name}__{dataset_name}"
+                                )
+
+                            except Exception as e:
+                                logger.error(f"Training failed: {model_name} on {synthetic_dataset}: {e}")
+                                results[dataset_name][effective_name][model_name] = {
+                                    "error":     str(e),
+                                    "profiling": train_profiler.export(),
+                                }
+                            finally:
+                                train_profiler.reset()
 
                     except Exception as e:
-                        logger.error(f"Training failed: {model_name} on {synthetic_dataset}: {e}")
-                        results[dataset_name][synth_name][model_name] = {
+                        logger.error(f"Sampling failed: {effective_name} on {dataset_name}: {e}")
+                        results[dataset_name][effective_name] = {
                             "error":     str(e),
-                            "profiling": train_profiler.export(),
+                            "profiling": factor_profiler.export(),
                         }
                     finally:
-                        train_profiler.reset()
+                        factor_profiler.reset()
 
             except Exception as e:
                 logger.error(f"Synthesis failed: {synth_name} on {dataset_name}: {e}")

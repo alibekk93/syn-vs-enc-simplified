@@ -186,6 +186,20 @@ def list_n_bits(config_path: str, out_path: str):
 
     logger.info(f"Wrote {len(values)} n_bits values to {out_path}")
 
+
+def list_oversampling(config_path: str, out_path: str):
+    """Expand the configured oversampling factors and save to a flat file (one value per line)."""
+    from src.utils import expand_oversampling
+
+    cfg = load_config(config_path)
+    values = expand_oversampling(cfg)
+
+    with open(out_path, "w") as f:
+        for v in values:
+            f.write(f"{v}\n")
+
+    logger.info(f"Wrote {len(values)} oversampling factors to {out_path}")
+
 # --------------------------------------------------
 # CLI
 # --------------------------------------------------
@@ -334,6 +348,22 @@ if __name__ == "__main__":
         help="Path to write the n_bits list (default: fhe_n_bits.txt)"
     )
 
+    # ---- list-oversampling ----
+    oversampling_parser = subparsers.add_parser(
+        "list-oversampling",
+        help="Expand the configured oversampling factors to a flat file (one value per line)"
+    )
+    oversampling_parser.add_argument(
+        "--config",
+        default="config/synthesizers.yaml",
+        help="Path to synthesizers config (default: config/synthesizers.yaml)"
+    )
+    oversampling_parser.add_argument(
+        "--out",
+        default="synth_oversampling.txt",
+        help="Path to write the oversampling factors list (default: synth_oversampling.txt)"
+    )
+
     args = parser.parse_args()
 
     if args.command == "run-experiment":
@@ -356,3 +386,6 @@ if __name__ == "__main__":
 
     elif args.command == "list-n-bits":
         list_n_bits(args.config, args.out)
+
+    elif args.command == "list-oversampling":
+        list_oversampling(args.config, args.out)

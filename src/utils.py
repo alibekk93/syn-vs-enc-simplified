@@ -58,6 +58,11 @@ def expand_n_bits(cfg: dict) -> list:
     return list(range(start, end + 1, step))
 
 
+def expand_oversampling(cfg: dict) -> list[int]:
+    """Returns the list of oversampling factors from a synthesizers.yaml-style config."""
+    return list(cfg.get("oversampling", {}).get("factors", [100]))
+
+
 def inject_n_bits(fhe_cfg: dict, n_bits) -> dict:
     """Returns a copy of fhe_cfg with n_bits injected into every model config."""
     if n_bits is None:

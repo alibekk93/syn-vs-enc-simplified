@@ -293,7 +293,7 @@ class Synthesizer:
         self.synthesizer.fit(self.df)
         logger.debug(f"[{self.name}] Fitting complete")
 
-    def sample(self, num_rows: Optional[Union[int, str]] = None) -> pd.DataFrame:
+    def sample(self, num_rows: Optional[Union[int, str]] = None, oversampling_factor: int = 100) -> pd.DataFrame:
         """
         Sample synthetic data from the fitted synthesizer.
 
@@ -319,7 +319,7 @@ class Synthesizer:
         logger.debug(f"[{self.name}] Sampling complete")
 
         synthetic_df = self._restore_dtypes(synthetic_df)
-        self._save_synthetic(synthetic_df)
+        self._save_synthetic(synthetic_df, oversampling_factor=oversampling_factor)
         return synthetic_df
 
     def save(self) -> None:
@@ -407,12 +407,12 @@ class Synthesizer:
                     logger.warning(f"[{self.name}] Could not restore integer dtype for column '{col}'")
         return result
 
-    def _save_synthetic(self, df: pd.DataFrame) -> None:
+    def _save_synthetic(self, df: pd.DataFrame, oversampling_factor: int = 100) -> None:
         nan_rows = int(df.isna().any(axis=1).sum())
         if nan_rows > 0:
             logger.warning(f"[{self.name}] Dropping {nan_rows} NaN rows from synthetic {self.dataset_name} data")
             df = df.dropna()
         self.synthetic_dir.mkdir(parents=True, exist_ok=True)
-        path = self.synthetic_dir / f"{self.name}__{self.dataset_name}.csv"
+        path = self.synthetic_dir / f"{self.name}_{oversampling_factor}__{self.dataset_name}.csv"
         df.to_csv(path, index=False)
         logger.debug(f"[{self.name}] Synthetic data saved → {path}")
