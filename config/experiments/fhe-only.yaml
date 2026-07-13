@@ -21,4 +21,4 @@ pipelines:
   synthetic:     false
   fhe:           true
 
-bootstrap: false
+bootstrap: true
