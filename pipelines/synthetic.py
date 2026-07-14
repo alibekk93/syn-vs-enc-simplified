@@ -29,7 +29,7 @@ def run(
     datasets:             list[str] | None = None,
     synthesizers:         list[str] | None = None,
     models:               list[str] | None = None,
-    oversampling_factors: list[int] | None = None,
+    synth_scales: list[int] | None = None,
     skip_training:        bool = False,
     device: str | None = None,
     n_bootstrap: int = 0,
@@ -44,10 +44,10 @@ def run(
         datasets:             List of dataset names (default: all).
         synthesizers:         List of synthesizer names (default: all in config).
         models:               List of model names (default: all in config).
-        oversampling_factors: Percentages of original dataset size to sample
-            (default: synthesizers.yaml `oversampling.factors`, e.g. [100, 150, 300]).
-            Each synthesizer is fit once per dataset then sampled at every factor.
-            Results and output files include the factor in the synthesizer name,
+        synth_scales: Percentages of original dataset size to generate as synthetic training data
+            (default: synthesizers.yaml `synth_scale.values`, e.g. [100, 150, 300]).
+            Each synthesizer is fit once per dataset then sampled at every scale.
+            Results and output files include the scale in the synthesizer name,
             e.g. "arf_100", "arf_150", "arf_300".
         skip_training: If True, only synthesize data without training models.
         device: "cpu" or "cuda" (default: synthesizers.yaml's `device`). Used
@@ -69,7 +69,7 @@ def run(
     targets_datasets     = datasets             or list(load_config(datasets_config).keys())
     targets_synthesizers = synthesizers         or [k for k in synth_cfg_all.get("methods", [])]
     targets_models       = models               or [m["name"] for m in load_config(models_config).get("models", [])]
-    targets_factors      = oversampling_factors or list(synth_cfg_all.get("oversampling", {}).get("factors", [100]))
+    targets_factors      = synth_scales or list(synth_cfg_all.get("synth_scale", {}).get("values", [100]))
 
     active_device = device or synth_cfg_all.get("device", "cpu")
     require_device(active_device)
@@ -77,7 +77,7 @@ def run(
     logger.debug(
         f"Synthetic pipeline started — datasets: {targets_datasets}, "
         f"synthesizers: {targets_synthesizers}, models: {targets_models}, "
-        f"oversampling_factors: {targets_factors}, device: {active_device}"
+        f"synth_scales: {targets_factors}, device: {active_device}"
     )
 
     results = {}
@@ -121,7 +121,7 @@ def run(
 
                         n_rows = int(synth.n_rows_original * factor / 100)
                         with factor_profiler.time_block("synthesis_sample"):
-                            synth.sample(num_rows=n_rows, oversampling_factor=factor)
+                            synth.sample(num_rows=n_rows, synth_scale=factor)
 
                         factor_profiler.stop_memory_sampling()
                         factor_profiler.save(f"{effective_name}__sampling__{dataset_name}")

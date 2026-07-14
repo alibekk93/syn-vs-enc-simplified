@@ -22,11 +22,11 @@ BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
 
 def parse_filename_metadata(filename):
     """
-    Extract mode / model / dataset / n_bits / oversampling from a filename or raw mode key.
+    Extract mode / model / dataset / n_bits / synth_scale from a filename or raw mode key.
 
     Examples:
         fhe_4__logistic_regression__heart_disease.json  → mode=fhe, n_bits=4
-        ctgan_100__rf__diabetes.json                    → mode=ctgan, oversampling=100
+        ctgan_100__rf__diabetes.json                    → mode=ctgan, synth_scale=100
         standard__rf__diabetes.json                     → mode=standard
         ctgan                                           → mode=ctgan  (bare JSON mode key)
     """
@@ -39,7 +39,7 @@ def parse_filename_metadata(filename):
         "model": None,
         "dataset": None,
         "n_bits": None,
-        "oversampling": None,
+        "synth_scale": None,
     }
 
     # FHE: fhe_N
@@ -49,11 +49,11 @@ def parse_filename_metadata(filename):
         meta["n_bits"] = int(fhe_match.group(1))
         parts[0] = "fhe"
     else:
-        # Synthetic mode with oversampling suffix: e.g. ctgan_100, gaussian_copula_150
+        # Synthetic mode with synth_scale suffix: e.g. ctgan_100, gaussian_copula_150
         synth_match = re.match(r"^(.+)_(\d+)$", parts[0])
         if synth_match:
             meta["mode"] = synth_match.group(1)
-            meta["oversampling"] = int(synth_match.group(2))
+            meta["synth_scale"] = int(synth_match.group(2))
         else:
             meta["mode"] = parts[0]
 
@@ -69,7 +69,7 @@ def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):
     with open(path) as f:
         data = json.load(f)
 
-    key_cols = ["mode", "n_bits", "oversampling", "model", "dataset", "seed"]
+    key_cols = ["mode", "n_bits", "synth_scale", "model", "dataset", "seed"]
 
     metric_records = []
     for raw_mode, models in data.get("metrics", {}).items():
@@ -82,7 +82,7 @@ def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):
                     metric_records.append({
                         "mode": meta["mode"],
                         "n_bits": meta["n_bits"],
-                        "oversampling": meta["oversampling"],
+                        "synth_scale": meta["synth_scale"],
                         "model": model_name,
                         "dataset": dataset_name,
                         "seed": entry["seed"],
@@ -98,7 +98,7 @@ def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):
                     resource_records.append({
                         "mode": meta["mode"],
                         "n_bits": meta["n_bits"],
-                        "oversampling": meta["oversampling"],
+                        "synth_scale": meta["synth_scale"],
                         "model": model_name,
                         "dataset": dataset_name,
                         "seed": entry["seed"],
@@ -155,7 +155,7 @@ def load_simple_bootstrap(
     if profiles_dir is None:
         profiles_dir = _profiles_dir_from_config()
 
-    key_cols = ["mode", "n_bits", "oversampling", "model", "dataset"]
+    key_cols = ["mode", "n_bits", "synth_scale", "model", "dataset"]
 
     metric_records = []
     for path in Path(metrics_dir).glob("*.json"):
@@ -168,7 +168,7 @@ def load_simple_bootstrap(
             metric_records.append({
                 "mode": meta["mode"],
                 "n_bits": meta["n_bits"],
-                "oversampling": meta["oversampling"],
+                "synth_scale": meta["synth_scale"],
                 "model": meta["model"],
                 "dataset": meta["dataset"],
                 "bootstrap_iter": i,
@@ -183,7 +183,7 @@ def load_simple_bootstrap(
         profile_records.append({
             "mode": meta["mode"],
             "n_bits": meta["n_bits"],
-            "oversampling": meta["oversampling"],
+            "synth_scale": meta["synth_scale"],
             "model": meta["model"],
             "dataset": meta["dataset"],
             "train_time": sum(data.get("training_time", {}).values()),
@@ -750,8 +750,8 @@ def generate_all_figures():
     df = load_simple_bootstrap()
     df = df.dropna(how="all")
 
-    # For synth modes with oversampling variants, keep only oversampling=100
-    df = df[df["oversampling"].isna() | (df["oversampling"] == 100)]
+    # For synth modes with synth_scale variants, keep only synth_scale=100
+    df = df[df["synth_scale"].isna() | (df["synth_scale"] == 100)]
 
     available_cols = set(df.columns)
 

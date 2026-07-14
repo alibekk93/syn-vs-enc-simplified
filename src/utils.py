@@ -58,9 +58,9 @@ def expand_n_bits(cfg: dict) -> list:
     return list(range(start, end + 1, step))
 
 
-def expand_oversampling(cfg: dict) -> list[int]:
-    """Returns the list of oversampling factors from a synthesizers.yaml-style config."""
-    return list(cfg.get("oversampling", {}).get("factors", [100]))
+def expand_synth_scales(cfg: dict) -> list[int]:
+    """Returns the list of synth_scale values from a synthesizers.yaml-style config."""
+    return list(cfg.get("synth_scale", {}).get("values", [100]))
 
 
 def inject_n_bits(fhe_cfg: dict, n_bits) -> dict:

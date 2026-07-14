@@ -24,7 +24,7 @@ Run after experiments are complete:
 python main.py create-visuals
 ```
 
-This reads from `results/metrics/metrics/` and `results/resource_profiles/` and writes SVG figures to `results/figures/`. Only synth mode results at 100% oversampling are included in the plots.
+This reads from `results/metrics/metrics/` and `results/resource_profiles/` and writes SVG figures to `results/figures/`. Only synth mode results at synth_scale=100 are included in the plots.
 
 To use internal validation bootstrap data instead (see below), call `load_internal_validation_bootstrap()` directly from `src/visualization.py` and pass the resulting DataFrame to `generate_all_figures()`, or swap the loader inside that function.
 
@@ -45,11 +45,11 @@ Two bootstrap approaches are implemented in `src/visualization.py`:
 - synthesis-specific fitting plots
 - radar plots
 - dynamic pareto?
-- % oversampling line graph
+- % synth_scale line graph
 
 ### synthesizers
 - reuse synths
-- % oversampling (e.g. 100 is same as original)
+- % synth_scale (e.g. 100 = same as original)
 
 ## Abstract draft
 The increasing use of machine learning in healthcare has amplified concerns around the protection of sensitive patient information, particularly protected health information (PHI). Privacy-preserving approaches such as synthetic data generation and secure computation have emerged as promising solutions, yet their relative trade-offs in predictive performance and computational efficiency remain insufficiently characterized. In this work, we present a unified experimental framework for systematically comparing these approaches on tabular healthcare datasets.

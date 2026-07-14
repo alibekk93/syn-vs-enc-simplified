@@ -38,8 +38,8 @@
 #
 # =============================================================================
 
-oversampling:
-  factors: [100, 150, 300]   # percentages of original dataset size; 100 = same size
+synth_scale:
+  values: [100, 150, 300]   # percentages of original dataset size; 100 = same size
 
 split:
   test_size: 0.2
