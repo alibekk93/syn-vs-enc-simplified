@@ -157,10 +157,19 @@ def load_simple_bootstrap(
 
     key_cols = ["mode", "n_bits", "synth_scale", "model", "dataset"]
 
+    def _load_json_first(p):
+        """Load the first complete JSON object from a file, ignoring any trailing content."""
+        with open(p) as f:
+            content = f.read().strip()
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            obj, _ = json.JSONDecoder().raw_decode(content)
+            return obj
+
     metric_records = []
     for path in Path(metrics_dir).glob("*.json"):
-        with open(path) as f:
-            data = json.load(f)
+        data = _load_json_first(path)
         meta = parse_filename_metadata(path.name)
         metrics = data.get("metrics", {})
         n = max((len(v) for v in metrics.values() if isinstance(v, list)), default=0)
@@ -177,8 +186,7 @@ def load_simple_bootstrap(
 
     profile_records = []
     for path in Path(profiles_dir).glob("*.json"):
-        with open(path) as f:
-            data = json.load(f)
+        data = _load_json_first(path)
         meta = parse_filename_metadata(path.name)
         profile_records.append({
             "mode": meta["mode"],
