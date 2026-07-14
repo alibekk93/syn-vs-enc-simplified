@@ -404,6 +404,7 @@ class Synthesizer:
                     numeric = pd.to_numeric(result[col], errors="coerce")
                     result[col] = numeric.round().clip(col_min, col_max).astype(orig_dtype)
                 except (TypeError, ValueError, OverflowError):
+                    result[col] = numeric
                     logger.warning(f"[{self.name}] Could not restore integer dtype for column '{col}'")
         return result
 
@@ -412,6 +413,11 @@ class Synthesizer:
         if nan_rows > 0:
             logger.warning(f"[{self.name}] Dropping {nan_rows} NaN rows from synthetic {self.dataset_name} data")
             df = df.dropna()
+        if df.empty:
+            raise ValueError(
+                f"[{self.name}] Synthetic data for '{self.dataset_name}' is empty after dropping NaN rows — "
+                "synthesizer produced no usable samples"
+            )
         self.synthetic_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthetic_dir / f"{self.name}_{synth_scale}__{self.dataset_name}.csv"
         df.to_csv(path, index=False)
