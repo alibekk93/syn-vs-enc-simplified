@@ -39,7 +39,7 @@
 # =============================================================================
 
 synth_scale:
-  values: [100, 150, 300]   # percentages of original dataset size; 100 = same size
+  values: [100, 150, 200, 250, 300]   # percentages of original dataset size; 100 = same size
 
 split:
   test_size: 0.2
