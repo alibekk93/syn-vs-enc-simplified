@@ -803,6 +803,8 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
     synth_scales = sorted(synth_df["synth_scale"].dropna().unique().astype(int)) if not synth_df.empty else []
 
     fig, ax = plt.subplots(figsize=(7, 5))
+    label_fs = max(font_cfg["tick_size"] - 2, 7)
+    line_labels = []  # (y_data_value, text, color) — collected for right-side annotation
 
     for method in synth_methods:
         m_df = synth_df[synth_df["mode"] == method]
@@ -819,25 +821,28 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
         color = method_colors[method]
         label = modes_cfg.get(method, {}).get("label", method)
         ax.plot(agg["synth_scale"], agg["median"], color=color, marker="o",
-                label=label, linewidth=1.8, markersize=5, zorder=3)
+                linewidth=1.8, markersize=5, zorder=3)
         ax.fill_between(agg["synth_scale"], agg["q25"], agg["q75"],
                         color=color, alpha=0.15, zorder=1)
+        line_labels.append((agg["median"].iloc[-1], label, color))
 
     real_gcfg = groups_cfg.get("real", {})
     real_color = real_gcfg.get("base_color", "#2ca02c")
     if not std_df.empty:
-        ax.axhline(std_df[metric].median(), color=real_color, linewidth=1.8,
-                   linestyle="--", label="Real", zorder=5)
+        std_med = std_df[metric].median()
+        ax.axhline(std_med, color=real_color, linewidth=1.8, linestyle="--", zorder=5)
         ax.axhspan(std_df[metric].quantile(0.25), std_df[metric].quantile(0.75),
                    color=real_color, alpha=0.10, zorder=0)
+        line_labels.append((std_med, "Real", real_color))
 
     fhe_gcfg = groups_cfg.get("fhe", {})
     fhe_color = fhe_gcfg.get("base_color", "#1f77b4")
     if not fhe_df.empty:
-        ax.axhline(fhe_df[metric].median(), color=fhe_color, linewidth=1.8,
-                   linestyle=":", label="FHE 8-bit", zorder=5)
+        fhe_med = fhe_df[metric].median()
+        ax.axhline(fhe_med, color=fhe_color, linewidth=1.8, linestyle=":", zorder=5)
         ax.axhspan(fhe_df[metric].quantile(0.25), fhe_df[metric].quantile(0.75),
                    color=fhe_color, alpha=0.10, zorder=0)
+        line_labels.append((fhe_med, "FHE 8-bit", fhe_color))
 
     ax.set_xlabel("Synth Scale (%)", fontsize=font_cfg["label_size"])
     ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
@@ -847,7 +852,13 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
         ax.set_xticks(synth_scales)
         ax.set_xticklabels([f"{int(s)}%" for s in synth_scales])
 
-    ax.legend(fontsize=max(font_cfg["tick_size"] - 1, 8), frameon=False)
+    # Draw labels to the right of each line using axes-x / data-y transform
+    yaxis_xform = ax.get_yaxis_transform()
+    for y_val, text, color in line_labels:
+        ax.text(1.02, y_val, text, transform=yaxis_xform,
+                color=color, va="center", ha="left",
+                fontsize=label_fs, clip_on=False)
+
     sns.despine(ax=ax)
     plt.tight_layout()
 
