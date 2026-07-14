@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 FIGURES_DIR = Path("results/figures")
-BOOTSTRAP_PATH = "results/bootstrap/aggregated.json"
+BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
 
 
 # ===========================================================
@@ -126,6 +126,75 @@ def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):
         return metrics_df
 
     return pd.merge(metrics_df, profiles_df, on=key_cols, how="outer")
+
+
+def load_simple_bootstrap(
+    metrics_dir="results/metrics/metrics",
+    profiles_dir="results/resource_profiles",
+):
+    """
+    Load simple bootstrap results from per-file JSONs.
+
+    Metrics files store each metric as a list of per-iteration values (one list
+    per bootstrap iteration). Resource profiles are single scalar measurements.
+    Returns a DataFrame with one row per bootstrap iteration per
+    (mode, model, dataset) combination, with resource columns joined as constants.
+    """
+    key_cols = ["mode", "n_bits", "oversampling", "model", "dataset"]
+
+    metric_records = []
+    for path in Path(metrics_dir).glob("*.json"):
+        with open(path) as f:
+            data = json.load(f)
+        meta = parse_filename_metadata(path.name)
+        metrics = data.get("metrics", {})
+        n = max((len(v) for v in metrics.values() if isinstance(v, list)), default=0)
+        for i in range(n):
+            metric_records.append({
+                "mode": meta["mode"],
+                "n_bits": meta["n_bits"],
+                "oversampling": meta["oversampling"],
+                "model": meta["model"],
+                "dataset": meta["dataset"],
+                "bootstrap_iter": i,
+                **{k: v[i] for k, v in metrics.items() if isinstance(v, list) and i < len(v)},
+            })
+
+    profile_records = []
+    for path in Path(profiles_dir).glob("*.json"):
+        with open(path) as f:
+            data = json.load(f)
+        meta = parse_filename_metadata(path.name)
+        profile_records.append({
+            "mode": meta["mode"],
+            "n_bits": meta["n_bits"],
+            "oversampling": meta["oversampling"],
+            "model": meta["model"],
+            "dataset": meta["dataset"],
+            "train_time": sum(data.get("training_time", {}).values()),
+            "synth_fit_time": data.get("training_time", {}).get("synthesis_fit"),
+            "fhe_fit_time": data.get("training_time", {}).get("training_fit"),
+            "fhe_compile_time": data.get("training_time", {}).get("training_compile"),
+            "inf_time_total": data.get("inference_time", {}).get("total"),
+            "inf_time_per_sample": data.get("inference_time", {}).get("per_sample"),
+            "mem_train_avg": data.get("memory", {}).get("training", {}).get("average_mb"),
+            "mem_train_peak": data.get("memory", {}).get("training", {}).get("peak_mb"),
+            "mem_inf_avg": data.get("memory", {}).get("inference", {}).get("average_mb"),
+            "mem_inf_peak": data.get("memory", {}).get("inference", {}).get("peak_mb"),
+            "model_size_mb": data.get("storage", {}).get("model_size_mb"),
+            "data_size_mb": data.get("storage", {}).get("data_size_mb"),
+            "circuit_complexity": data.get("fhe", {}).get("circuit_complexity"),
+        })
+
+    metrics_df = pd.DataFrame(metric_records)
+    profiles_df = pd.DataFrame(profile_records)
+
+    if metrics_df.empty:
+        return profiles_df
+    if profiles_df.empty:
+        return metrics_df
+
+    return pd.merge(metrics_df, profiles_df, on=key_cols, how="left")
 
 
 # ===========================================================
@@ -663,7 +732,7 @@ def generate_all_figures():
     cfg = _load_viz_config()
     metrics = cfg.get("metrics", [])
 
-    df = load_internal_validation_bootstrap()
+    df = load_simple_bootstrap()
     df = df.dropna(how="all")
 
     # For synth modes with oversampling variants, keep only oversampling=100
