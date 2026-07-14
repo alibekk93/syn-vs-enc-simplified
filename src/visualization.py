@@ -738,6 +738,129 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
 
 
 # ===========================================================
+# SYNTH SCALE LINE PLOTS
+# ===========================================================
+
+def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=None,
+                            viz_cfg_path="config/visualization.yaml"):
+    """
+    Line plot of metric vs synth_scale for each synthesizer method.
+
+    Lines:   one per synth method (orange shades, IQR band)
+    Dashed:  raw/standard performance (green horizontal reference, IQR band)
+    Dotted:  FHE 8-bit performance (blue horizontal reference, IQR band)
+    x-axis:  synth_scale (100, 150, 300)
+    y-axis:  metric (median of bootstrap iterations)
+
+    Pass a df that retains all synth_scale values (do not pre-filter to scale=100).
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    font_cfg = cfg["fonts"]
+    fig_cfg = cfg["figures"]
+    modes_cfg = cfg.get("modes", {})
+    groups_cfg = cfg.get("groups", {})
+
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams["font.family"] = font_cfg.get("family", "sans-serif")
+
+    if save_dir is None:
+        save_dir = Path(fig_cfg["dir"])
+
+    if df is None:
+        df = load_simple_bootstrap()
+
+    if metric not in df.columns:
+        return None, None
+
+    subset = df[(df["dataset"] == dataset) & (df["model"] == model)].dropna(subset=[metric])
+    if subset.empty:
+        return None, None
+
+    # Synthetic modes: rows with a synth_scale value (not standard, not fhe)
+    synth_df = subset[subset["synth_scale"].notna()].copy()
+    synth_methods = sorted(m for m in synth_df["mode"].unique() if m not in ("standard", "fhe"))
+
+    std_df = subset[subset["mode"] == "standard"]
+    fhe_df = subset[(subset["mode"] == "fhe") & (subset["n_bits"] == 8)]
+
+    if not synth_methods and std_df.empty and fhe_df.empty:
+        return None, None
+
+    # Colors for synth methods via the synthetic group lightness ramp
+    synth_gcfg = groups_cfg.get("synthetic", {})
+    base_color = synth_gcfg.get("base_color", "#e07b2a")
+    l_range = synth_gcfg.get("lightness_range", [0.65, 0.38])
+    if len(synth_methods) > 1:
+        method_colors = dict(zip(synth_methods, _lightness_ramp(base_color, len(synth_methods), l_range)))
+    elif synth_methods:
+        method_colors = {synth_methods[0]: base_color}
+    else:
+        method_colors = {}
+
+    synth_scales = sorted(synth_df["synth_scale"].dropna().unique().astype(int)) if not synth_df.empty else []
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+
+    for method in synth_methods:
+        m_df = synth_df[synth_df["mode"] == method]
+        grp = m_df.groupby("synth_scale")[metric]
+        agg = pd.DataFrame({
+            "median": grp.median(),
+            "q25": grp.quantile(0.25),
+            "q75": grp.quantile(0.75),
+        }).reset_index().sort_values("synth_scale")
+
+        if agg.empty:
+            continue
+
+        color = method_colors[method]
+        label = modes_cfg.get(method, {}).get("label", method)
+        ax.plot(agg["synth_scale"], agg["median"], color=color, marker="o",
+                label=label, linewidth=1.8, markersize=5, zorder=3)
+        ax.fill_between(agg["synth_scale"], agg["q25"], agg["q75"],
+                        color=color, alpha=0.15, zorder=1)
+
+    real_gcfg = groups_cfg.get("real", {})
+    real_color = real_gcfg.get("base_color", "#2ca02c")
+    if not std_df.empty:
+        ax.axhline(std_df[metric].median(), color=real_color, linewidth=1.8,
+                   linestyle="--", label="Real", zorder=5)
+        ax.axhspan(std_df[metric].quantile(0.25), std_df[metric].quantile(0.75),
+                   color=real_color, alpha=0.10, zorder=0)
+
+    fhe_gcfg = groups_cfg.get("fhe", {})
+    fhe_color = fhe_gcfg.get("base_color", "#1f77b4")
+    if not fhe_df.empty:
+        ax.axhline(fhe_df[metric].median(), color=fhe_color, linewidth=1.8,
+                   linestyle=":", label="FHE 8-bit", zorder=5)
+        ax.axhspan(fhe_df[metric].quantile(0.25), fhe_df[metric].quantile(0.75),
+                   color=fhe_color, alpha=0.10, zorder=0)
+
+    ax.set_xlabel("Synth Scale (%)", fontsize=font_cfg["label_size"])
+    ax.set_ylabel(format_metric_name(metric), fontsize=font_cfg["label_size"])
+    ax.tick_params(labelsize=font_cfg["tick_size"])
+
+    if synth_scales:
+        ax.set_xticks(synth_scales)
+        ax.set_xticklabels([f"{int(s)}%" for s in synth_scales])
+
+    ax.legend(fontsize=max(font_cfg["tick_size"] - 1, 8), frameon=False)
+    sns.despine(ax=ax)
+    plt.tight_layout()
+
+    fmt = fig_cfg["format"]
+    save_path = Path(save_dir) / f"synth_scale_lines_{metric}__{dataset}__{model}.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+    return fig, ax
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
@@ -747,16 +870,16 @@ def generate_all_figures():
     cfg = _load_viz_config()
     metrics = cfg.get("metrics", [])
 
-    df = load_simple_bootstrap()
-    df = df.dropna(how="all")
+    df_all = load_simple_bootstrap()
+    df_all = df_all.dropna(how="all")
 
-    # For synth modes with synth_scale variants, keep only synth_scale=100
-    df = df[df["synth_scale"].isna() | (df["synth_scale"] == 100)]
+    # For violin plots: keep only synth_scale=100 (ignore 150, 300 variants)
+    df = df_all[df_all["synth_scale"].isna() | (df_all["synth_scale"] == 100)]
 
-    available_cols = set(df.columns)
+    available_cols = set(df_all.columns)
 
-    datasets = df["dataset"].dropna().unique()
-    models = df["model"].dropna().unique()
+    datasets = df_all["dataset"].dropna().unique()
+    models = df_all["model"].dropna().unique()
 
     for metric in metrics:
         if metric not in available_cols:
@@ -764,6 +887,7 @@ def generate_all_figures():
         for dataset in datasets:
             for model in models:
                 plot_violinplot(dataset, model, metric, df=df, cfg=cfg)
+                plot_synth_scale_lines(dataset, model, metric, df=df_all, cfg=cfg)
 
     plot_fhe_training_breakdown(df, cfg=cfg)
     plot_fhe_complexity_cost(df, cfg=cfg)
