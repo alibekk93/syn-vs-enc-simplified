@@ -128,9 +128,19 @@ def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):
     return pd.merge(metrics_df, profiles_df, on=key_cols, how="outer")
 
 
+def _metrics_dir_from_config(models_cfg_path="config/models.yaml"):
+    cfg = load_config(models_cfg_path)
+    return cfg.get("output", {}).get("results_dir", "results/metrics")
+
+
+def _profiles_dir_from_config(resource_cfg_path="config/resource_profiling.yaml"):
+    cfg = load_config(resource_cfg_path)
+    return cfg.get("logging", {}).get("output_dir", "results/resource_profiles")
+
+
 def load_simple_bootstrap(
-    metrics_dir="results/metrics/metrics",
-    profiles_dir="results/resource_profiles",
+    metrics_dir=None,
+    profiles_dir=None,
 ):
     """
     Load simple bootstrap results from per-file JSONs.
@@ -140,6 +150,11 @@ def load_simple_bootstrap(
     Returns a DataFrame with one row per bootstrap iteration per
     (mode, model, dataset) combination, with resource columns joined as constants.
     """
+    if metrics_dir is None:
+        metrics_dir = _metrics_dir_from_config()
+    if profiles_dir is None:
+        profiles_dir = _profiles_dir_from_config()
+
     key_cols = ["mode", "n_bits", "oversampling", "model", "dataset"]
 
     metric_records = []
