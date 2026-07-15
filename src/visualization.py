@@ -530,8 +530,10 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
 _FHE_MARKERS = ["o", "s", "^", "D", "v", "P"]
 
-# Distinct qualitative colours for per-model lines (complexity cost redesign)
-_MODEL_COLORS = ["#1f77b4", "#ff7f00", "#2ca02c", "#d62728", "#9467bd"]
+# Distinct qualitative colours for per-model lines (complexity cost redesign).
+# Chosen to avoid conflict with the project group colours:
+#   blue (#1f77b4) = FHE, orange (#e07b2a) = Synthetic, green (#2ca02c) = Real
+_MODEL_COLORS = ["#d62728", "#9467bd", "#17becf", "#e377c2", "#8c564b"]
 
 
 def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
@@ -699,14 +701,17 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
                    label=m.replace("_", " ").title())
             for m in models_sorted
         ]
-        axes[0].legend(
+        fig.legend(
             handles=model_handles,
             fontsize=legend_fs,
-            loc="upper left",
+            ncol=len(model_handles),
+            loc="lower center",
+            bbox_to_anchor=(0.5, 0.0),
             frameon=False,
+            handletextpad=0.4,
+            columnspacing=1.0,
         )
-
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0.08, 1, 1])
 
         fmt       = fig_cfg["format"]
         save_path = Path(save_dir) / f"fhe_complexity_cost__{dataset}.{fmt}"
@@ -1012,8 +1017,7 @@ def plot_fhe_complexity_cost_multipanel(
         columnspacing=1.0,
     )
 
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.10)
+    plt.tight_layout(rect=[0, 0.12, 1, 1])
 
     fmt       = fig_cfg["format"]
     save_path = Path(save_dir) / f"fhe_complexity_cost_multipanel.{fmt}"
@@ -1153,8 +1157,7 @@ def plot_fhe_training_breakdown_multipanel(
         columnspacing=1.0,
     )
 
-    plt.tight_layout()
-    plt.subplots_adjust(bottom=0.10)
+    plt.tight_layout(rect=[0, 0.08, 1, 1])
 
     fmt       = fig_cfg["format"]
     save_path = Path(save_dir) / f"fhe_training_breakdown_multipanel.{fmt}"
