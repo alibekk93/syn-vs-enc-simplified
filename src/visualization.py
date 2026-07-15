@@ -880,6 +880,354 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
 
 
 # ===========================================================
+# IEEE PUBLICATION MULTIPANEL FIGURES
+# ===========================================================
+#
+# IEEE two-column conference format:
+#   - Full-width figure: 7.16 in
+#   - Single-column figure: 3.5 in
+#   - Minimum font size: 6 pt (8 pt recommended)
+#   - pdf.fonttype=42 / ps.fonttype=42 keeps text editable in Illustrator/Inkscape
+
+_IEEE_FULL_WIDTH_IN = 7.16
+
+_DATASET_LABELS = {
+    "breast_cancer": "Breast Cancer",
+    "diabetes": "Diabetes",
+    "heart_disease": "Heart Disease",
+    "maternal_health_risk": "Maternal Health",
+    "pregnancy_outcome": "Preg. Outcome",
+}
+
+_MODEL_ABBREV = {
+    "logistic_regression": "LR",
+    "random_forest": "RF",
+    "xgboost": "XGB",
+    "mlp": "MLP",
+}
+
+
+def _fmt_dataset(name: str) -> str:
+    return _DATASET_LABELS.get(name, name.replace("_", " ").title())
+
+
+def _abbrev_model(name: str) -> str:
+    return _MODEL_ABBREV.get(name, name.replace("_", " ").title())
+
+
+def _add_panel_label(ax, idx: int, fontsize: int = 8):
+    """Bold (a), (b), … label at the upper-left of an axes panel."""
+    letter = chr(ord("a") + idx)
+    ax.text(
+        -0.14, 1.05, f"({letter})",
+        transform=ax.transAxes,
+        fontsize=fontsize, fontweight="bold",
+        va="bottom", ha="left",
+        clip_on=False,
+    )
+
+
+def plot_fhe_complexity_cost_multipanel(
+    df, save_dir=FIGURES_DIR, cfg=None, viz_cfg_path="config/visualization.yaml"
+):
+    """
+    IEEE double-column multipanel figure — FHE complexity cost.
+
+    Layout: 2 rows × N_datasets columns.
+      Row 0: circuit complexity vs compile time.
+      Row 1: circuit complexity vs inference time per sample.
+    Columns share the same circuit-complexity x-axis; y-axes are independent
+    so each panel's scale reflects its own dataset rather than being dominated
+    by an outlier.
+    Saved as: fhe_complexity_cost_multipanel.{fmt}
+    """
+    import matplotlib.patches as mpatches
+    from matplotlib.lines import Line2D
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    fig_cfg = cfg["figures"]
+    fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+
+    plt.rcParams.update({
+        "font.family": cfg["fonts"].get("family", "sans-serif"),
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    needed = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample", "n_bits"]
+    fhe_df = df[df["mode"] == "fhe"].dropna(subset=needed)
+    if fhe_df.empty:
+        return
+
+    agg_cols = ["circuit_complexity", "fhe_compile_time", "inf_time_per_sample"]
+    full_agg = (
+        fhe_df.groupby(["dataset", "model", "n_bits"])[agg_cols]
+        .mean()
+        .reset_index()
+    )
+
+    datasets = sorted(full_agg["dataset"].dropna().unique())
+    models_sorted = sorted(full_agg["model"].unique())
+    n_bits_sorted = sorted(full_agg["n_bits"].unique())
+    n_col = len(datasets)
+
+    model_markers = {
+        m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)
+    }
+    base_color = fhe_gcfg.get("base_color", "#1f77b4")
+    l_range = fhe_gcfg.get("lightness_range", [0.72, 0.32])
+    nbits_color = dict(
+        zip(n_bits_sorted, _lightness_ramp(base_color, len(n_bits_sorted), l_range))
+    )
+
+    panels = [
+        ("fhe_compile_time",    "Compile Time (s)"),
+        ("inf_time_per_sample", "Inf. Time / Sample (s)"),
+    ]
+
+    tick_fs  = 7
+    label_fs = 8
+
+    fig, axes = plt.subplots(
+        2, n_col,
+        figsize=(_IEEE_FULL_WIDTH_IN, 3.8),
+        sharex="col",   # same circuit-complexity scale per dataset column
+        sharey=False,   # independent y-scale per panel for readability
+    )
+    if n_col == 1:
+        axes = axes.reshape(2, 1)
+
+    for col_idx, dataset in enumerate(datasets):
+        d_agg = full_agg[full_agg["dataset"] == dataset]
+
+        for row_idx, (y_col, y_label) in enumerate(panels):
+            ax = axes[row_idx, col_idx]
+
+            # Connector lines between precision levels within each model
+            for model in models_sorted:
+                m_data = d_agg[d_agg["model"] == model].sort_values("circuit_complexity")
+                if m_data.empty:
+                    continue
+                ax.plot(
+                    m_data["circuit_complexity"], m_data[y_col],
+                    color="#cccccc", linewidth=0.7, zorder=1,
+                )
+
+            # Scatter: color = n_bits, marker shape = model
+            for model in models_sorted:
+                for nb in n_bits_sorted:
+                    pt = d_agg[(d_agg["model"] == model) & (d_agg["n_bits"] == nb)]
+                    if pt.empty:
+                        continue
+                    ax.scatter(
+                        pt["circuit_complexity"].values, pt[y_col].values,
+                        color=nbits_color[nb], marker=model_markers[model],
+                        s=22, zorder=2, edgecolors="none",
+                    )
+
+            ax.tick_params(labelsize=tick_fs, length=3, pad=2)
+            sns.despine(ax=ax)
+
+            # y-label only on leftmost column
+            if col_idx == 0:
+                ax.set_ylabel(y_label, fontsize=label_fs, labelpad=3)
+
+            # x-label only on bottom row
+            if row_idx == len(panels) - 1:
+                ax.set_xlabel("Circuit Complexity", fontsize=label_fs, labelpad=3)
+
+            # Dataset name as column header on top row
+            if row_idx == 0:
+                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+
+            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs)
+
+    # Shared legend: precision (colour patch) | model (marker)
+    legend_fs   = 7
+    color_handles = [
+        mpatches.Patch(color=nbits_color[nb], label=f"{int(nb)}-bit")
+        for nb in n_bits_sorted
+    ]
+    marker_handles = [
+        Line2D(
+            [0], [0], marker=model_markers[m], color="#666666",
+            linestyle="None", markersize=5, label=_abbrev_model(m),
+        )
+        for m in models_sorted
+    ]
+    prec_lbl  = Line2D([], [], color="none", label="Precision:")
+    model_lbl = Line2D([], [], color="none", label="Model:")
+
+    all_handles = [prec_lbl] + color_handles + [model_lbl] + marker_handles
+    fig.legend(
+        handles=all_handles,
+        fontsize=legend_fs,
+        ncol=len(all_handles),
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        frameon=False,
+        handletextpad=0.3,
+        columnspacing=0.7,
+        borderpad=0.2,
+    )
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.14)
+
+    fmt       = fig_cfg["format"]
+    save_path = Path(save_dir) / f"fhe_complexity_cost_multipanel.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+
+def plot_fhe_training_breakdown_multipanel(
+    df, save_dir=FIGURES_DIR, cfg=None, viz_cfg_path="config/visualization.yaml"
+):
+    """
+    IEEE double-column multipanel figure — FHE training time breakdown.
+
+    Layout: 1 row × N_datasets columns, horizontal stacked bars.
+      Grey segment  = fit time.
+      Coloured segment = compile time (blue gradient, shade = n_bits).
+    Panels share the same y-axis (model × precision categories) so the
+    category labels appear only once on the left.
+    Saved as: fhe_training_breakdown_multipanel.{fmt}
+    """
+    from matplotlib.patches import Patch
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    fig_cfg = cfg["figures"]
+    fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+
+    plt.rcParams.update({
+        "font.family": cfg["fonts"].get("family", "sans-serif"),
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    fhe_df = df[df["mode"] == "fhe"].dropna(
+        subset=["fhe_fit_time", "fhe_compile_time", "n_bits"]
+    )
+    if fhe_df.empty:
+        return
+
+    full_agg = (
+        fhe_df.groupby(["dataset", "model", "n_bits"])[["fhe_fit_time", "fhe_compile_time"]]
+        .mean()
+        .reset_index()
+    )
+
+    datasets      = sorted(full_agg["dataset"].dropna().unique())
+    models_sorted = sorted(full_agg["model"].unique())
+    n_bits_sorted = sorted(full_agg["n_bits"].unique())
+    n_col         = len(datasets)
+
+    # Canonical bar order: outer = model (alphabetical), inner = n_bits (ascending)
+    y_categories = [
+        (model, int(nb)) for model in models_sorted for nb in n_bits_sorted
+    ]
+    y_labels_left = [f"{_abbrev_model(m)} {n}b" for m, n in y_categories]
+    n_bars = len(y_categories)
+    y_pos  = list(range(n_bars))
+
+    base_color = fhe_gcfg.get("base_color", "#1f77b4")
+    l_range    = fhe_gcfg.get("lightness_range", [0.72, 0.32])
+    nbits_color = dict(
+        zip(n_bits_sorted, _lightness_ramp(base_color, len(n_bits_sorted), l_range))
+    )
+
+    tick_fs  = 7
+    label_fs = 8
+    bar_h    = 0.60
+
+    fig_h = max(3.0, n_bars * 0.22 + 0.8)
+    fig, axes = plt.subplots(
+        1, n_col,
+        figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
+        sharey=True,
+    )
+    if n_col == 1:
+        axes = [axes]
+
+    def _safe_val(lookup, cat, col):
+        row = lookup.get(cat)
+        if row is None:
+            return 0.0
+        v = row[col]
+        return float(v) if pd.notna(v) else 0.0
+
+    for col_idx, dataset in enumerate(datasets):
+        ax    = axes[col_idx]
+        d_agg = full_agg[full_agg["dataset"] == dataset]
+        d_lut = {(r["model"], int(r["n_bits"])): r for _, r in d_agg.iterrows()}
+
+        fit_vals     = [_safe_val(d_lut, cat, "fhe_fit_time")     for cat in y_categories]
+        compile_vals = [_safe_val(d_lut, cat, "fhe_compile_time") for cat in y_categories]
+        bar_colors   = [nbits_color[nb] for _, nb in y_categories]
+
+        ax.barh(y_pos, fit_vals,     height=bar_h, color="#cccccc",   zorder=2)
+        ax.barh(y_pos, compile_vals, height=bar_h, color=bar_colors,
+                left=fit_vals, zorder=2)
+
+        ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+        ax.set_xlabel("Time (s)", fontsize=label_fs, labelpad=3)
+        ax.tick_params(labelsize=tick_fs, length=3, pad=2)
+        sns.despine(ax=ax)
+
+        _add_panel_label(ax, col_idx, fontsize=label_fs)
+
+    # y-tick labels only on leftmost panel (sharey hides the rest automatically)
+    axes[0].set_yticks(y_pos)
+    axes[0].set_yticklabels(y_labels_left, fontsize=tick_fs)
+    for ax in axes:
+        ax.set_ylim(-0.5, n_bars - 0.5)
+
+    # Thin horizontal separators between model groups
+    n_per_model = len(n_bits_sorted)
+    for ax in axes:
+        for i in range(len(models_sorted) - 1):
+            ax.axhline(
+                (i + 1) * n_per_model - 0.5,
+                color="#dddddd", linewidth=0.5, zorder=1,
+            )
+
+    # Shared legend
+    fit_handle = Patch(color="#cccccc", label="Fit")
+    compile_handles = [
+        Patch(color=nbits_color[nb], label=f"{int(nb)}-bit compile")
+        for nb in n_bits_sorted
+    ]
+    all_handles = [fit_handle] + compile_handles
+    n_lcol = min(len(all_handles), 9)
+
+    fig.legend(
+        handles=all_handles,
+        fontsize=7,
+        ncol=n_lcol,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        frameon=False,
+        handletextpad=0.3,
+        columnspacing=0.7,
+        borderpad=0.2,
+    )
+
+    plt.tight_layout()
+    plt.subplots_adjust(bottom=0.12)
+
+    fmt       = fig_cfg["format"]
+    save_path = Path(save_dir) / f"fhe_training_breakdown_multipanel.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
@@ -910,3 +1258,5 @@ def generate_all_figures():
 
     plot_fhe_training_breakdown(df, cfg=cfg)
     plot_fhe_complexity_cost(df, cfg=cfg)
+    plot_fhe_training_breakdown_multipanel(df, cfg=cfg)
+    plot_fhe_complexity_cost_multipanel(df, cfg=cfg)
