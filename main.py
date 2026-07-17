@@ -7,6 +7,7 @@ Usage:
     python main.py run-single-internal-validation-bootstrap --config config/main.yaml --seed 42
     python main.py list-n-bits
     python main.py create-visuals
+    python main.py aggregate-metrics-csv
 """
 
 import argparse
@@ -24,7 +25,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from src.utils import load_config, aggregate_internal_validation_bootstrap
+from src.utils import load_config, aggregate_internal_validation_bootstrap, aggregate_metrics_csv
 
 BOOTSTRAP_CFG = "config/bootstrap.yaml"
 
@@ -169,6 +170,12 @@ def create_visuals():
 def aggregate_internal_validation_bootstrap_results(results_dir: str, output_path: str):
     logger.info("=== Aggregating internal validation bootstrap results ===")
     aggregate_internal_validation_bootstrap(results_dir=results_dir, output_path=output_path)
+    logger.info("=== Aggregation complete ===")
+
+
+def aggregate_metrics_to_csv(metrics_dir: str, output_path: str):
+    logger.info("=== Aggregating metrics to CSV ===")
+    aggregate_metrics_csv(metrics_dir=metrics_dir, output_path=output_path)
     logger.info("=== Aggregation complete ===")
 
 
@@ -325,6 +332,23 @@ if __name__ == "__main__":
         help="Path to write the aggregated JSON file (default: results/internal_validation_bootstrap/aggregated.json)"
     )
 
+    # ---- aggregate-metrics-csv ----
+    metrics_csv_parser = subparsers.add_parser(
+        "aggregate-metrics-csv",
+        help="Aggregate results/metrics/*.json into one CSV (mean + 95% CI per metric, "
+             "one row per mode/dataset/model)"
+    )
+    metrics_csv_parser.add_argument(
+        "--metrics-dir",
+        default="results/metrics",
+        help="Directory containing per-run metrics JSON files (default: results/metrics)"
+    )
+    metrics_csv_parser.add_argument(
+        "--output",
+        default="results/metrics_aggregated.csv",
+        help="Path to write the aggregated CSV file (default: results/metrics_aggregated.csv)"
+    )
+
     # ---- generate-seeds ----
     seeds_parser = subparsers.add_parser(
         "generate-seeds",
@@ -391,6 +415,9 @@ if __name__ == "__main__":
 
     elif args.command == "aggregate-internal-validation-bootstrap":
         aggregate_internal_validation_bootstrap_results(args.results_dir, args.output)
+
+    elif args.command == "aggregate-metrics-csv":
+        aggregate_metrics_to_csv(args.metrics_dir, args.output)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)

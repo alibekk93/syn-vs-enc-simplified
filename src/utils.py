@@ -2,9 +2,11 @@
 """Utility functions."""
 
 import copy
+import csv
 import json
 import logging
 import random
+import numpy as np
 import yaml
 from pathlib import Path
 
@@ -190,3 +192,64 @@ def aggregate_internal_validation_bootstrap(results_dir: str = "results/internal
     output_file.parent.mkdir(parents=True, exist_ok=True)
     output_file.write_text(json.dumps(output, indent=2), encoding="utf-8")
     logger.info(f"Aggregated internal validation bootstrap results saved to {output_path}")
+
+
+_METRICS_CSV_METRIC_NAMES = ["accuracy", "f1", "roc_auc", "precision", "recall"]
+
+
+def aggregate_metrics_csv(
+    metrics_dir: str = "results/metrics",
+    output_path: str = "results/metrics_aggregated.csv",
+):
+    """Aggregate every `{mode}__{model}__{dataset}__test__metrics.json` file in
+    metrics_dir into a single CSV with one row per (mode, dataset, model).
+
+    `mode` is taken verbatim from the filename's leading `__`-delimited segment,
+    so synthetic-data scale suffixes (arf_100, ctgan_300, ...) and FHE bit-widths
+    (fhe_2, fhe_12, ...) are kept as distinct mode values rather than collapsed
+    into a shared method name.
+
+    Each metric gets three columns — `{metric}_mean`, `{metric}_ci_low`,
+    `{metric}_ci_high` — computed from that file's n=1000 bootstrap distribution:
+    the mean, and the 95% CI via the 2.5th/97.5th percentiles.
+    """
+    fieldnames = ["mode", "dataset", "model"]
+    for metric in _METRICS_CSV_METRIC_NAMES:
+        fieldnames += [f"{metric}_mean", f"{metric}_ci_low", f"{metric}_ci_high"]
+
+    rows = []
+    for path in sorted(Path(metrics_dir).glob("*.json")):
+        parts = path.stem.split("__")
+        if len(parts) != 5 or parts[3] != "test" or parts[4] != "metrics":
+            logger.warning(f"Unrecognized metrics filename: {path.name}")
+            continue
+        mode, model, dataset = parts[0], parts[1], parts[2]
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        metrics = data.get("metrics", {})
+
+        row = {"mode": mode, "dataset": dataset, "model": model}
+        for metric in _METRICS_CSV_METRIC_NAMES:
+            values = metrics.get(metric)
+            if not values:
+                row[f"{metric}_mean"] = None
+                row[f"{metric}_ci_low"] = None
+                row[f"{metric}_ci_high"] = None
+                continue
+
+            arr = np.asarray(values, dtype=float)
+            ci_low, ci_high = np.percentile(arr, [2.5, 97.5])
+            row[f"{metric}_mean"] = round(float(arr.mean()), 4)
+            row[f"{metric}_ci_low"] = round(float(ci_low), 4)
+            row[f"{metric}_ci_high"] = round(float(ci_high), 4)
+
+        rows.append(row)
+
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    logger.info(f"Aggregated {len(rows)} mode/dataset/model rows to {output_path}")
