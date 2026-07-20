@@ -7,6 +7,7 @@ Usage:
     python main.py run-single-internal-validation-bootstrap --config config/main.yaml --seed 42
     python main.py list-n-bits
     python main.py create-visuals
+    python main.py create-multipanel-visuals
     python main.py aggregate-metrics-csv
 """
 
@@ -167,6 +168,13 @@ def create_visuals():
     logger.info("=== Visualization complete ===")
 
 
+def create_multipanel_visuals():
+    logger.info("=== Creating multipanel visualizations ===")
+    from src.visualization import generate_multipanel_figures
+    generate_multipanel_figures()
+    logger.info("=== Multipanel visualization complete ===")
+
+
 def aggregate_internal_validation_bootstrap_results(results_dir: str, output_path: str):
     logger.info("=== Aggregating internal validation bootstrap results ===")
     aggregate_internal_validation_bootstrap(results_dir=results_dir, output_path=output_path)
@@ -294,6 +302,12 @@ if __name__ == "__main__":
         help="Generate visualizations only"
     )
 
+    # ---- create-multipanel-visuals ----
+    subparsers.add_parser(
+        "create-multipanel-visuals",
+        help="Generate only the IEEE multipanel figures (skips per-combination single-panel plots)"
+    )
+
     # ---- verify-gpu ----
     verify_gpu_parser = subparsers.add_parser(
         "verify-gpu",
@@ -335,7 +349,7 @@ if __name__ == "__main__":
     # ---- aggregate-metrics-csv ----
     metrics_csv_parser = subparsers.add_parser(
         "aggregate-metrics-csv",
-        help="Aggregate results/metrics/*.json into one CSV (mean + 95% CI per metric, "
+        help="Aggregate results/metrics/*.json into one CSV (mean + 95%% CI per metric, "
              "one row per mode/dataset/model)"
     )
     metrics_csv_parser.add_argument(
@@ -409,6 +423,9 @@ if __name__ == "__main__":
 
     elif args.command == "create-visuals":
         create_visuals()
+
+    elif args.command == "create-multipanel-visuals":
+        create_multipanel_visuals()
 
     elif args.command == "verify-gpu":
         verify_gpu(args.venv, args.device)
