@@ -280,6 +280,23 @@ def _lightness_ramp(base_color, n, lightness_range):
     return colors
 
 
+def _mode_color(cfg, key):
+    """
+    Single flat colour for a mode_key (no lightness ramp).
+
+    Explicit ``modes[key].color`` wins; otherwise the mode's group ``base_color``.
+    Used where one colour per mode is needed (synth-scale lines, reference bands).
+    FHE bit-width shading is handled separately by _build_mode_display.
+    """
+    modes_cfg = cfg.get("modes", {})
+    groups_cfg = cfg.get("groups", {})
+    explicit = modes_cfg.get(key, {}).get("color")
+    if explicit:
+        return explicit
+    group = "fhe" if key.startswith("fhe_") else modes_cfg.get(key, {}).get("group", "other")
+    return groups_cfg.get(group, {}).get("base_color", "#999999")
+
+
 def _build_mode_display(cfg, raw_keys):
     """
     Build label, color, and group mappings from visualization config.
@@ -311,13 +328,20 @@ def _build_mode_display(cfg, raw_keys):
         base = gcfg.get("base_color", "#999999")
         l_range = gcfg.get("lightness_range")
 
-        if len(members) == 1 or not l_range:
-            for k in members:
+        # Ramp only when a group asks for it (FHE, by bit-width); an explicit
+        # per-mode color always wins over the ramp/base (synth methods).
+        ramp_map = {}
+        if l_range and len(members) > 1:
+            ramp_map = dict(zip(members, _lightness_ramp(base, len(members), l_range)))
+
+        for k in members:
+            explicit = modes_cfg.get(k, {}).get("color")
+            if explicit:
+                group_colors[k] = explicit
+            elif k in ramp_map:
+                group_colors[k] = ramp_map[k]
+            else:
                 group_colors[k] = base
-        else:
-            ramp = _lightness_ramp(base, len(members), l_range)
-            for k, color in zip(members, ramp):
-                group_colors[k] = color
 
     label_map = {}
     color_map = {}
@@ -549,6 +573,7 @@ def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
     font_cfg = cfg["fonts"]
     fig_cfg  = cfg["figures"]
     fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+    fit_color = cfg.get("fhe_breakdown", {}).get("fit_color", "#cccccc")
 
     sns.set_style(cfg.get("style", "white"))
     sns.set_context(cfg.get("context", "paper"))
@@ -585,7 +610,7 @@ def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
 
         fig, ax = plt.subplots(figsize=(8, max(4, len(agg) * 0.45)))
 
-        ax.barh(y_pos, agg["fhe_fit_time"], color="#cccccc", height=0.6)
+        ax.barh(y_pos, agg["fhe_fit_time"], color=fit_color, height=0.6)
 
         for nb in n_bits_sorted:
             nb_rows  = agg[agg["n_bits"] == nb]
@@ -608,7 +633,7 @@ def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
         _mid_nb = n_bits_sorted[len(n_bits_sorted) // 2]
         ax.legend(
             handles=[
-                _mp.Patch(color="#cccccc", label="Fit"),
+                _mp.Patch(color=fit_color, label="Fit"),
                 _mp.Patch(color=nbits_color[_mid_nb], label="Compile\n(light→dark: low→high bits)"),
             ],
             fontsize=max(font_cfg["tick_size"] - 2, 8),
@@ -666,8 +691,9 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
 
         models_sorted = sorted(agg["model"].unique())
         n_bits_sorted = sorted(agg["n_bits"].unique())
+        model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
         model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-        model_colors  = {m: _MODEL_COLORS[i % len(_MODEL_COLORS)]  for i, m in enumerate(models_sorted)}
+        model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
 
         panels = [
             ("fhe_compile_time",    "Compile Time (s)"),
@@ -744,7 +770,6 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
     font_cfg = cfg["fonts"]
     fig_cfg = cfg["figures"]
     modes_cfg = cfg.get("modes", {})
-    groups_cfg = cfg.get("groups", {})
 
     sns.set_style(cfg.get("style", "white"))
     sns.set_context(cfg.get("context", "paper"))
@@ -773,16 +798,8 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
     if not synth_methods and std_df.empty and fhe_df.empty:
         return None, None
 
-    # Colors for synth methods via the synthetic group lightness ramp
-    synth_gcfg = groups_cfg.get("synthetic", {})
-    base_color = synth_gcfg.get("base_color", "#e07b2a")
-    l_range = synth_gcfg.get("lightness_range", [0.65, 0.38])
-    if len(synth_methods) > 1:
-        method_colors = dict(zip(synth_methods, _lightness_ramp(base_color, len(synth_methods), l_range)))
-    elif synth_methods:
-        method_colors = {synth_methods[0]: base_color}
-    else:
-        method_colors = {}
+    # Distinct per-method colors from config (same colour a method has in the violins).
+    method_colors = {m: _mode_color(cfg, m) for m in synth_methods}
 
     synth_scales = sorted(synth_df["synth_scale"].dropna().unique().astype(int)) if not synth_df.empty else []
 
@@ -810,8 +827,7 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
                         color=color, alpha=0.15, zorder=1)
         line_labels.append((agg["median"].iloc[-1], label, color))
 
-    real_gcfg = groups_cfg.get("real", {})
-    real_color = real_gcfg.get("base_color", "#2ca02c")
+    real_color = _mode_color(cfg, "standard")
     if not std_df.empty:
         std_med = std_df[metric].median()
         ax.axhline(std_med, color=real_color, linewidth=1.8, linestyle="--", zorder=5)
@@ -819,8 +835,7 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
                    color=real_color, alpha=0.10, zorder=0)
         line_labels.append((std_med, "Real", real_color))
 
-    fhe_gcfg = groups_cfg.get("fhe", {})
-    fhe_color = fhe_gcfg.get("base_color", "#1f77b4")
+    fhe_color = _mode_color(cfg, "fhe_8")
     if not fhe_df.empty:
         fhe_med = fhe_df[metric].median()
         ax.axhline(fhe_med, color=fhe_color, linewidth=1.8, linestyle=":", zorder=5)
@@ -986,8 +1001,9 @@ def plot_fhe_complexity_cost_multipanel(
     n_bits_sorted = sorted(full_agg["n_bits"].unique())
     n_col         = len(datasets)
 
+    model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
     model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-    model_colors  = {m: _MODEL_COLORS[i % len(_MODEL_COLORS)]  for i, m in enumerate(models_sorted)}
+    model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
 
     panels = [
         ("fhe_compile_time",    "Compile Time (s)"),
@@ -1085,6 +1101,9 @@ def plot_fhe_training_breakdown_multipanel(
 
     fig_cfg = cfg["figures"]
     fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+    breakdown_cfg = cfg.get("fhe_breakdown", {})
+    fit_color     = breakdown_cfg.get("fit_color", "#cccccc")
+    divider_color = breakdown_cfg.get("group_divider_color", "#dddddd")
 
     _apply_publication_style(cfg)
 
@@ -1147,7 +1166,7 @@ def plot_fhe_training_breakdown_multipanel(
         compile_vals = [_safe_val(d_lut, cat, "fhe_compile_time") for cat in y_categories]
         bar_colors   = [nbits_color[nb] for _, nb in y_categories]
 
-        ax.barh(y_pos, fit_vals,     height=bar_h, color="#cccccc",   zorder=2)
+        ax.barh(y_pos, fit_vals,     height=bar_h, color=fit_color,   zorder=2)
         ax.barh(y_pos, compile_vals, height=bar_h, color=bar_colors,
                 left=fit_vals, zorder=2)
 
@@ -1170,7 +1189,7 @@ def plot_fhe_training_breakdown_multipanel(
         for i in range(len(models_sorted) - 1):
             ax.axhline(
                 (i + 1) * n_per_model - 0.5,
-                color="#dddddd", linewidth=0.5, zorder=1,
+                color=divider_color, linewidth=0.5, zorder=1,
             )
 
     # Simplified shared legend — y-axis labels already encode model + n_bits,
@@ -1178,7 +1197,7 @@ def plot_fhe_training_breakdown_multipanel(
     # two segment types; caption can note that darker shade = higher bit-width.
     legend_fs = 7
     _mid_nb = n_bits_sorted[len(n_bits_sorted) // 2]
-    fit_handle     = Patch(color="#cccccc", label="Fit")
+    fit_handle     = Patch(color=fit_color, label="Fit")
     compile_handle = Patch(color=nbits_color[_mid_nb],
                            label="Compile  (light→dark: low→high bits)")
     fig.legend(
@@ -1228,7 +1247,6 @@ def plot_synth_scale_lines_multipanel(
 
     fig_cfg    = cfg["figures"]
     modes_cfg  = cfg.get("modes", {})
-    groups_cfg = cfg.get("groups", {})
 
     _apply_publication_style(cfg)
 
@@ -1244,23 +1262,14 @@ def plot_synth_scale_lines_multipanel(
     if not datasets or not models_sorted:
         return
 
-    # Global synth-method set + stable colours (same shade for a method in every
-    # panel), unlike the single-panel version which recomputes per subset.
+    # Global synth-method set + distinct per-method colours from config (same colour
+    # a method has in the violins, identical in every panel).
     synth_all     = data[data["synth_scale"].notna()]
     synth_methods = sorted(m for m in synth_all["mode"].unique() if m not in ("standard", "fhe"))
 
-    synth_gcfg = groups_cfg.get("synthetic", {})
-    base_color = synth_gcfg.get("base_color", "#e07b2a")
-    l_range    = synth_gcfg.get("lightness_range", [0.65, 0.38])
-    if len(synth_methods) > 1:
-        method_colors = dict(zip(synth_methods, _lightness_ramp(base_color, len(synth_methods), l_range)))
-    elif synth_methods:
-        method_colors = {synth_methods[0]: base_color}
-    else:
-        method_colors = {}
-
-    real_color = groups_cfg.get("real", {}).get("base_color", "#2ca02c")
-    fhe_color  = groups_cfg.get("fhe", {}).get("base_color", "#1f77b4")
+    method_colors = {m: _mode_color(cfg, m) for m in synth_methods}
+    real_color = _mode_color(cfg, "standard")
+    fhe_color  = _mode_color(cfg, "fhe_8")
 
     synth_scales = sorted(synth_all["synth_scale"].dropna().unique().astype(int))
 

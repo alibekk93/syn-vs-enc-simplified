@@ -20,28 +20,35 @@ fonts:
   tick_size: 13
 
 # Per-mode display labels and colors.
-# Each mode belongs to a group (real / synthetic / fhe).
-# Colors are auto-computed from the group's base_color + lightness_range —
-# adding a new mode only requires adding an entry here with the correct group.
+# Each mode belongs to a group (real / synthetic / fhe). A mode may set an explicit
+# `color:` (used for synthetic methods, so each is distinct); otherwise its colour
+# comes from the group's base_color (+ lightness_range shading, used by FHE).
 modes:
   standard:
     label: "Real"
     group: real
+  # Synthetic methods each get a distinct color (colorblind-leaning Tol "muted"
+  # subset) so lines/violins are easy to tell apart — no lightness shading here.
   gaussian_copula:
     label: "Gaussian Copula"
     group: synthetic
+    color: "#aa4499"        # purple
   ctgan:
     label: "CTGAN"
     group: synthetic
+    color: "#cc6677"        # rose
   bayesian_network:
     label: "Bayesian Network"
     group: synthetic
+    color: "#999933"        # olive
   nflow:
     label: "Normalizing Flow"
     group: synthetic
+    color: "#882255"        # wine
   arf:
     label: "ARF"
     group: synthetic
+    color: "#ddcc77"        # sand
   fhe:
     label_prefix: "FHE"
     group: fhe
@@ -56,12 +63,19 @@ groups:
     base_color: "#2ca02c"
   synthetic:
     label: "Synthetic"
-    base_color: "#e07b2a"
-    lightness_range: [0.65, 0.38]
+    base_color: "#e07b2a"    # fallback only; per-method colors are set under `modes`
   fhe:
     label: "FHE"
     base_color: "#1f77b4"
-    lightness_range: [0.72, 0.32]
+    lightness_range: [0.72, 0.32]   # FHE keeps lightness shading by bit-width
+
+# Per-model qualitative colors for the FHE complexity-cost line plots (one line per model).
+model_line_colors: ["#d62728", "#9467bd", "#17becf", "#e377c2", "#8c564b"]
+
+# FHE training-time breakdown segment colors.
+fhe_breakdown:
+  fit_color: "#cccccc"            # "fit" segment (compile segment uses the FHE blue ramp)
+  group_divider_color: "#dddddd"  # thin separator between model groups (multipanel)
 
 # Vertical separator lines drawn between mode groups on boxplots.
 separators:
