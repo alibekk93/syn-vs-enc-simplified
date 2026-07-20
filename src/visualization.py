@@ -555,10 +555,8 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
 _FHE_MARKERS = ["o", "s", "^", "D", "v", "P"]
 
-# Distinct qualitative colours for per-model lines (complexity cost redesign).
-# Chosen to avoid conflict with the project group colours:
-#   blue (#1f77b4) = FHE, orange (#e07b2a) = Synthetic, green (#2ca02c) = Real
-_MODEL_COLORS = ["#d62728", "#9467bd", "#17becf", "#e377c2", "#8c564b"]
+# Per-model complexity-cost lines are all one colour (the FHE base blue — that plot is
+# entirely FHE); models are told apart by marker (_FHE_MARKERS), not colour.
 
 
 def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
@@ -691,9 +689,9 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
 
         models_sorted = sorted(agg["model"].unique())
         n_bits_sorted = sorted(agg["n_bits"].unique())
-        model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
+        line_color    = _mode_color(cfg, "fhe_8")   # FHE base blue; this plot is all-FHE
         model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-        model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
+        model_colors  = {m: line_color for m in models_sorted}   # markers distinguish models
 
         panels = [
             ("fhe_compile_time",    "Compile Time (s)"),
@@ -1001,9 +999,9 @@ def plot_fhe_complexity_cost_multipanel(
     n_bits_sorted = sorted(full_agg["n_bits"].unique())
     n_col         = len(datasets)
 
-    model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
+    line_color    = _mode_color(cfg, "fhe_8")   # FHE base blue; this plot is all-FHE
     model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-    model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
+    model_colors  = {m: line_color for m in models_sorted}   # markers distinguish models
 
     panels = [
         ("fhe_compile_time",    "Compile Time (s)"),

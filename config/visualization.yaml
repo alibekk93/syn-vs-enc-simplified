@@ -27,28 +27,28 @@ modes:
   standard:
     label: "Real"
     group: real
-  # Synthetic methods each get a distinct color (colorblind-leaning Tol "muted"
-  # subset) so lines/violins are easy to tell apart — no lightness shading here.
+  # Synthetic methods each get a distinct Okabe-Ito colorblind-safe hue so
+  # lines/violins are easy to tell apart — no lightness shading here.
   gaussian_copula:
     label: "Gaussian Copula"
     group: synthetic
-    color: "#aa4499"        # purple
+    color: "#9467bd"        # purple
   ctgan:
     label: "CTGAN"
     group: synthetic
-    color: "#cc6677"        # rose
+    color: "#d55e00"        # vermilion
   bayesian_network:
     label: "Bayesian Network"
     group: synthetic
-    color: "#999933"        # olive
+    color: "#cc79a7"        # mauve
   nflow:
     label: "Normalizing Flow"
     group: synthetic
-    color: "#882255"        # wine
+    color: "#8c564b"        # brown
   arf:
     label: "ARF"
     group: synthetic
-    color: "#ddcc77"        # sand
+    color: "#e69f00"        # orange
   fhe:
     label_prefix: "FHE"
     group: fhe
@@ -60,17 +60,14 @@ modes:
 groups:
   real:
     label: "Real"
-    base_color: "#2ca02c"
+    base_color: "#009e73"    # Okabe-Ito bluish green
   synthetic:
     label: "Synthetic"
     base_color: "#e07b2a"    # fallback only; per-method colors are set under `modes`
   fhe:
     label: "FHE"
-    base_color: "#1f77b4"
+    base_color: "#0072b2"    # Okabe-Ito blue
     lightness_range: [0.72, 0.32]   # FHE keeps lightness shading by bit-width
-
-# Per-model qualitative colors for the FHE complexity-cost line plots (one line per model).
-model_line_colors: ["#d62728", "#9467bd", "#17becf", "#e377c2", "#8c564b"]
 
 # FHE training-time breakdown segment colors.
 fhe_breakdown:
