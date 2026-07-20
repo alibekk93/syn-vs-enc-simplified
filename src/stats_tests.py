@@ -72,13 +72,23 @@ _MODE_FAMILY_ORDER = {
     "fhe": 6,
 }
 
+TIE_RULES = ["split", "conservative", "exclude"]
+TEST_TYPES = ["difference", "noninferiority", "equivalence"]
+
+# Default non-inferiority / equivalence margin on the metric scale. 0.05 ROC-AUC
+# is a deliberately lenient screening margin: it is wide enough that the strong
+# modes (arf ~0.011 below baseline, FHE at high bit widths) can be declared
+# non-inferior, while ctgan and fhe_2 still fail.
+DEFAULT_MARGIN = 0.05
+
 _OUTPUT_FIELDS = [
-    "dataset", "model", "metric",
+    "dataset", "model", "metric", "comparison",
     "mode_a", "mode_b",
-    "n_valid", "n_ties",
+    "n_valid", "n_ties", "tie_rule",
     "mean_a", "mean_b", "mean_diff",
     "ci_low", "ci_high",
-    "p_value", "p_holm", "family_size", "significant_holm",
+    "margin", "p_diff", "p_noninf", "p_equiv",
+    "test_type", "p_value", "p_holm", "family_size", "significant_holm",
     "better",
 ]
 
@@ -174,44 +184,112 @@ def select_names(available: set[str], patterns: Optional[list[str]], label: str,
 # THE TEST
 # ===========================================================
 
-def paired_bootstrap_test(a: np.ndarray, b: np.ndarray) -> dict:
+def build_pairs(present: list[str], comparison: str,
+                reference: Optional[str]) -> list[tuple[str, str]]:
     """
-    Two-sided paired bootstrap test on index-aligned replicate arrays.
+    Build the contrast list for one cell, given the modes present in it.
 
-    Given d_i = a_i - b_i over i = 1..B, the p-value is the achieved
-    significance level (ASL) read off the difference distribution:
+    The choice is not cosmetic: it sets the Holm family size, and therefore
+    every adjusted p-value in the cell.
 
-        r = min(#{d>0}, #{d<0}) + #{d==0}
-        p = min(1, 2 * (r + 1) / (B + 1))
+      "pairwise"  every unordered pair, C(k,2) contrasts. Use when no single
+                  mode is privileged.
+      "reference" `reference` versus each other mode, k-1 contrasts. This is
+                  what a prespecified question like "each synthesis scale
+                  versus 100%" or "each bit width versus Real" actually asks;
+                  running it as pairwise would correct over a family several
+                  times too large and needlessly destroy power.
+      "adjacent"  consecutive modes in canonical order, k-1 contrasts, e.g.
+                  fhe_2 vs fhe_4, fhe_4 vs fhe_6. For dose-response style
+                  secondary analyses along a parameter sweep.
+
+    `present` is assumed already sorted into canonical order.
+    """
+    if comparison == "pairwise":
+        return list(itertools.combinations(present, 2))
+
+    if comparison == "adjacent":
+        return list(zip(present, present[1:]))
+
+    if comparison == "reference":
+        # mode_a is pinned to the reference so the column reads consistently
+        # down the table, overriding the usual canonical-order convention.
+        return [(reference, other) for other in present if other != reference]
+
+    raise ValueError(f"Unknown comparison {comparison!r}")
+
+
+def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
+                          tie_rule: str = "split",
+                          margin: float = DEFAULT_MARGIN) -> dict:
+    """
+    Paired bootstrap tests on index-aligned replicate arrays.
+
+    Computes three p-values from the same difference distribution
+    d_i = a_i - b_i, i = 1..B:
+
+      p_diff    two-sided test of H0: no difference.
+      p_noninf  one-sided non-inferiority test of H0: a is worse than b by at
+                least `margin`. A small p_noninf licenses "a is non-inferior
+                to b within margin".
+      p_equiv   TOST equivalence, max of the two one-sided tests against
+                -margin and +margin. A small p_equiv licenses "a and b are
+                equivalent within margin".
+
+    THE TWO-SIDED STATISTIC
+    -----------------------
+        r = min(#{d>0}, #{d<0}) + (ties, per tie_rule)
+        p_diff = min(1, 2 * (r + 1) / (B + 1))
 
     Why the proportion-on-the-wrong-side form rather than a shifted null: the
     bootstrap distribution of d estimates the sampling distribution of the true
     difference, and asking how much of it lies past 0 is the exact dual of the
     percentile confidence interval. Since this project already reports 95% CIs
     as np.percentile(arr, [2.5, 97.5]) (see aggregate_metrics_csv in utils.py),
-    this choice guarantees p < 0.05 <=> the reported CI of the difference
+    this choice guarantees p_diff < 0.05 <=> the reported CI of the difference
     excludes 0. A shifted-null formulation would let a row show a CI excluding
     zero next to p > 0.05, which is indefensible in a paper table.
 
     Why (r+1)/(B+1) rather than r/B: with B=1000, r=0 would give p=0, which is
     false — it only means the test's resolution was exhausted. Adding the
     observed statistic to the reference set (Davison & Hinkley 1997; North,
-    Curtis & Sham 2002) floors p at 2/1001 ~ 0.002.
+    Curtis & Sham 2002) floors p at 2/1001 ~ 0.002. Report such values as
+    "p < 0.002", never as zero.
 
-    Why ties are charged to the smaller side: a tie is a replicate on which the
-    two modes were indistinguishable at the stored precision. Assigning it to
-    either directional count would manufacture evidence the data does not
-    contain. Adding ties to the minimum can only increase r, hence only increase
-    p, so quantization artifacts can never create significance. The fully
-    degenerate case falls out for free — if every replicate ties then r = B and
-    p = 2*(B+1)/(B+1) = 2, clipped to 1.0, which is exactly right for two modes
-    that produced identical predictions.
+    TIE HANDLING
+    ------------
+    Metrics are stored rounded to 4 decimals and ROC-AUC is discrete on test
+    sets of 57-203 rows, so exact ties (d_i == 0) are common and are sometimes
+    total.
+
+      "split"        (default) r = min + ties/2. The standard sign-test
+                     treatment: ties are evidence for neither direction, so
+                     they are divided evenly. Unbiased about direction.
+      "conservative" r = min + ties. Ties are charged entirely to the smaller
+                     side, so quantization can never manufacture significance.
+                     Correct when ties mean genuinely identical predictions
+                     (e.g. high-bit FHE reproducing plaintext), but it imposes
+                     a hard ceiling: because significance at alpha=0.05 needs
+                     r <= 24 at B=1000, ANY comparison with more than 24 ties
+                     becomes impossible to call significant regardless of
+                     effect size.
+      "exclude"      Ties dropped and B reduced accordingly. Highest power,
+                     but a comparison that is mostly ties then rests on a small
+                     effective sample, so read n_ties before trusting it.
+
+    Under every rule, two modes with identical predictions still give p = 1.0:
+    with all B replicates tied, "split" yields r = B/2 and p = 2*(B/2+1)/(B+1),
+    which is just above 1 and clips to 1.0.
     """
     out = {
-        "n_valid": 0, "n_ties": None,
+        "n_valid": 0, "n_ties": None, "tie_rule": tie_rule,
         "mean_a": None, "mean_b": None, "mean_diff": None,
-        "ci_low": None, "ci_high": None, "p_value": None,
+        "ci_low": None, "ci_high": None,
+        "margin": margin,
+        "p_diff": None, "p_noninf": None, "p_equiv": None,
     }
+    if tie_rule not in TIE_RULES:
+        raise ValueError(f"Unknown tie_rule {tie_rule!r}; expected one of {TIE_RULES}")
 
     # Joint mask. Dropping NaNs independently per array would shift the two
     # series relative to each other and destroy the index alignment the whole
@@ -229,8 +307,16 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray) -> dict:
     n_neg = int((d < 0).sum())
     n_tie = int((d == 0).sum())
 
-    r = min(n_pos, n_neg) + n_tie
-    p = min(1.0, 2.0 * (r + 1) / (n_valid + 1))
+    smaller = min(n_pos, n_neg)
+    if tie_rule == "conservative":
+        r, b_eff = smaller + n_tie, n_valid
+    elif tie_rule == "split":
+        r, b_eff = smaller + n_tie / 2.0, n_valid
+    else:  # "exclude"
+        r, b_eff = smaller, n_valid - n_tie
+
+    # All replicates tied under "exclude" leaves nothing to test on.
+    p_diff = 1.0 if b_eff <= 0 else min(1.0, 2.0 * (r + 1) / (b_eff + 1))
 
     ci_low, ci_high = np.percentile(d, [2.5, 97.5])
     out.update(
@@ -241,8 +327,22 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray) -> dict:
         ci_low=round(float(ci_low), 4),
         ci_high=round(float(ci_high), 4),
         # 6dp: the 2/1001 floor needs the resolution to stay distinguishable.
-        p_value=round(float(p), 6),
+        p_diff=round(float(p_diff), 6),
     )
+
+    if margin and margin > 0:
+        # One-sided ASLs against the shifted nulls. Ties play no special role
+        # here: the null sits at +/- margin, not at 0, so exact zeros in d are
+        # ordinary interior points and no tie rule applies.
+        p_noninf = (int((d <= -margin).sum()) + 1) / (n_valid + 1)
+        p_upper = (int((d >= margin).sum()) + 1) / (n_valid + 1)
+        out.update(
+            p_noninf=round(float(min(1.0, p_noninf)), 6),
+            # TOST: equivalence requires rejecting BOTH one-sided nulls, so the
+            # larger of the two p-values governs.
+            p_equiv=round(float(min(1.0, max(p_noninf, p_upper))), 6),
+        )
+
     return out
 
 
@@ -281,13 +381,28 @@ def run_pairwise_tests(
     datasets: Optional[list[str]] = None,
     models: Optional[list[str]] = None,
     alpha: float = 0.05,
+    comparison: str = "pairwise",
+    reference: Optional[str] = None,
+    tie_rule: str = "split",
+    margin: float = DEFAULT_MARGIN,
+    test_type: str = "difference",
 ) -> list[dict]:
     """
-    All pairwise mode comparisons within each (dataset, classifier) cell.
+    Mode comparisons within each (dataset, classifier) cell.
 
     Holm correction is applied per cell: each cell is an independent
-    sub-analysis, so its own set of pairwise tests is the natural family.
+    sub-analysis, so its own set of contrasts is the natural family. The
+    `comparison` design therefore determines the family size — see build_pairs.
+
+    `test_type` selects which of the three computed p-values is the primary,
+    Holm-corrected one. All three are reported raw regardless, so a table can
+    show the difference test alongside the equivalence test without rerunning.
     """
+    if test_type not in TEST_TYPES:
+        raise SystemExit(f"Unknown --test-type {test_type!r}; expected one of {TEST_TYPES}")
+    if test_type != "difference" and not (margin and margin > 0):
+        raise SystemExit(f"--test-type {test_type} requires a positive --margin")
+
     replicates = _load_replicates(metrics_dir, metric)
     if not replicates:
         logger.warning(f"No usable replicate series found in {metrics_dir}")
@@ -309,9 +424,31 @@ def run_pairwise_tests(
     if not sel_datasets or not sel_models:
         raise SystemExit("Dataset or model selection is empty — nothing to compare.")
 
+    if comparison == "reference":
+        if not reference:
+            raise SystemExit("--comparison reference requires --reference MODE")
+        if reference not in sel_modes:
+            raise SystemExit(
+                f"--reference {reference!r} is not among the selected modes. "
+                f"Selected: {', '.join(sel_modes)}"
+            )
+
+    _PRIMARY_P = {
+        "difference": "p_diff",
+        "noninferiority": "p_noninf",
+        "equivalence": "p_equiv",
+    }
+    primary_key = _PRIMARY_P[test_type]
+
     logger.info(
         f"Comparing {len(sel_modes)} modes across {len(sel_datasets)} dataset(s) "
         f"x {len(sel_models)} classifier(s): {', '.join(sel_modes)}"
+    )
+    logger.info(
+        f"design={comparison}"
+        + (f" (reference={reference})" if comparison == "reference" else "")
+        + f", test={test_type}, tie_rule={tie_rule}"
+        + (f", margin={margin}" if test_type != "difference" else "")
     )
 
     rows: list[dict] = []
@@ -327,8 +464,14 @@ def run_pairwise_tests(
                 )
                 continue
 
+            if comparison == "reference" and reference not in present:
+                logger.info(
+                    f"{dataset}/{model}: reference {reference} absent — skipping cell"
+                )
+                continue
+
             cell_rows: list[dict] = []
-            for mode_a, mode_b in itertools.combinations(present, 2):
+            for mode_a, mode_b in build_pairs(present, comparison, reference):
                 try:
                     a = replicates[(dataset, model, mode_a)]
                     b = replicates[(dataset, model, mode_b)]
@@ -339,15 +482,18 @@ def run_pairwise_tests(
                         )
                         continue
 
-                    result = paired_bootstrap_test(a, b)
+                    result = paired_bootstrap_test(a, b, tie_rule=tie_rule, margin=margin)
                     diff = result["mean_diff"]
                     row = {
                         "dataset": dataset,
                         "model": model,
                         "metric": metric,
+                        "comparison": comparison,
                         "mode_a": mode_a,
                         "mode_b": mode_b,
                         **result,
+                        "test_type": test_type,
+                        "p_value": result[primary_key],
                         # All supported metrics are higher-is-better, so the sign
                         # of the difference names the winner directly. Descriptive
                         # only — read it together with significant_holm.
@@ -412,16 +558,19 @@ def write_stats_markdown(rows: list[dict], output_path: str) -> None:
             lines += [
                 "",
                 f"## {row['dataset']} / {row['model']}  ({row['metric']}, "
+                f"{row['comparison']} design, {row['test_type']} test, "
                 f"Holm family n={row['family_size']})",
                 "",
-                "| mode_a | mode_b | mean_a | mean_b | diff | 95% CI | ties | p | p_holm | sig |",
-                "|---|---|---|---|---|---|---|---|---|---|",
+                "| mode_a | mode_b | mean_a | mean_b | diff | 95% CI | ties | "
+                "p_diff | p_noninf | p_equiv | p_holm | sig |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|",
             ]
         ci = "—" if row["ci_low"] is None else f"[{row['ci_low']}, {row['ci_high']}]"
         lines.append(
             f"| {row['mode_a']} | {row['mode_b']} | {fmt(row['mean_a'])} | "
             f"{fmt(row['mean_b'])} | {fmt(row['mean_diff'])} | {ci} | "
-            f"{fmt(row['n_ties'])} | {fmt(row['p_value'])} | {fmt(row['p_holm'])} | "
+            f"{fmt(row['n_ties'])} | {fmt(row['p_diff'])} | {fmt(row['p_noninf'])} | "
+            f"{fmt(row['p_equiv'])} | {fmt(row['p_holm'])} | "
             f"{'**yes**' if row['significant_holm'] else 'no'} |"
         )
 
@@ -438,22 +587,40 @@ def run(
     models: Optional[list[str]] = None,
     alpha: float = 0.05,
     fmt: str = "csv",
+    comparison: str = "pairwise",
+    reference: Optional[str] = None,
+    tie_rule: str = "split",
+    margin: float = DEFAULT_MARGIN,
+    test_type: str = "difference",
 ) -> list[dict]:
     """Entry point used by `main.py paired-bootstrap-tests`."""
     rows = run_pairwise_tests(
         metrics_dir=metrics_dir, metric=metric,
         modes=modes, datasets=datasets, models=models, alpha=alpha,
+        comparison=comparison, reference=reference,
+        tie_rule=tie_rule, margin=margin, test_type=test_type,
     )
     if not rows:
         # Still write the header so downstream steps don't crash on a missing file.
         logger.warning("No comparisons produced — writing an empty table")
 
-    base = Path(output) if output else Path(DEFAULT_OUTPUT_DIR) / f"paired_bootstrap__{metric}.csv"
+    if output:
+        base = Path(output)
+    else:
+        # Encode the design in the default filename so successive runs answering
+        # different questions do not silently overwrite one another.
+        suffix = f"__{test_type}" if test_type != "difference" else ""
+        base = Path(DEFAULT_OUTPUT_DIR) / f"paired_bootstrap__{metric}__{comparison}{suffix}.csv"
     if fmt in ("csv", "both"):
         write_stats_csv(rows, str(base))
     if fmt in ("markdown", "both"):
         write_stats_markdown(rows, str(base.with_suffix(".md")))
 
     n_sig = sum(1 for r in rows if r["significant_holm"])
-    logger.info(f"{n_sig}/{len(rows)} comparisons significant after Holm (alpha={alpha})")
+    verdict = {
+        "difference": "showed a significant difference",
+        "noninferiority": "established non-inferiority",
+        "equivalence": "established equivalence",
+    }[test_type]
+    logger.info(f"{n_sig}/{len(rows)} contrasts {verdict} after Holm (alpha={alpha})")
     return rows

@@ -189,12 +189,20 @@ def aggregate_metrics_to_csv(metrics_dir: str, output_path: str):
 
 
 def run_paired_bootstrap_tests(metrics_dir: str, output, metric: str, modes,
-                               datasets, models, alpha: float, fmt: str):
+                               datasets, models, alpha: float, fmt: str,
+                               comparison: str, reference, tie_rule: str,
+                               margin: float, test_type: str):
     logger.info(f"=== Paired bootstrap significance tests ({metric}) ===")
+    # --reference only makes sense in the reference design, so supplying it is
+    # taken as the intent, saving the user from passing both flags.
+    if reference and comparison == "pairwise":
+        comparison = "reference"
     from src.stats_tests import run as run_stats_tests
     run_stats_tests(
         metrics_dir=metrics_dir, output=output, metric=metric,
         modes=modes, datasets=datasets, models=models, alpha=alpha, fmt=fmt,
+        comparison=comparison, reference=reference, tie_rule=tie_rule,
+        margin=margin, test_type=test_type,
     )
     logger.info("=== Significance testing complete ===")
 
@@ -423,6 +431,52 @@ if __name__ == "__main__":
         help="Classifiers to include; exact names and/or globs (default: all)"
     )
     stats_parser.add_argument(
+        "--comparison",
+        default="pairwise",
+        choices=["pairwise", "reference", "adjacent"],
+        help="Contrast design within each cell, which sets the Holm family size: "
+             "'pairwise' = every pair, C(k,2) tests; 'reference' = --reference vs "
+             "each other mode, k-1 tests (use for prespecified questions such as "
+             "each synthesis scale vs 100%%, or each bit width vs Real); "
+             "'adjacent' = consecutive modes in canonical order, k-1 tests "
+             "(dose-response secondary analyses). Default: pairwise"
+    )
+    stats_parser.add_argument(
+        "--reference",
+        default=None,
+        help="Reference mode for --comparison reference, e.g. --reference standard "
+             "or --reference arf_100. Implies --comparison reference."
+    )
+    stats_parser.add_argument(
+        "--tie-rule",
+        default="split",
+        choices=["split", "conservative", "exclude"],
+        help="How replicates with an exact zero difference are counted. 'split' "
+             "(default) halves them, the standard sign-test treatment. "
+             "'conservative' charges them all against significance, which is right "
+             "when ties mean identical predictions but makes any comparison with "
+             ">24 ties impossible to call significant. 'exclude' drops them and "
+             "reduces the effective B."
+    )
+    stats_parser.add_argument(
+        "--margin",
+        type=float,
+        default=0.05,
+        help="Non-inferiority / equivalence margin on the metric scale "
+             "(default: 0.05 ROC-AUC). Used by --test-type noninferiority and "
+             "equivalence; p_noninf and p_equiv are reported for every run."
+    )
+    stats_parser.add_argument(
+        "--test-type",
+        default="difference",
+        choices=["difference", "noninferiority", "equivalence"],
+        help="Which p-value is the primary, Holm-corrected one. 'difference' "
+             "(default) tests against no difference; 'noninferiority' tests that "
+             "mode_a is not worse than mode_b by more than --margin; "
+             "'equivalence' is TOST against +/- --margin. All three are always "
+             "reported raw in p_diff / p_noninf / p_equiv."
+    )
+    stats_parser.add_argument(
         "--alpha",
         type=float,
         default=0.05,
@@ -511,7 +565,9 @@ if __name__ == "__main__":
     elif args.command == "paired-bootstrap-tests":
         run_paired_bootstrap_tests(args.metrics_dir, args.output, args.metric,
                                    args.modes, args.datasets, args.models,
-                                   args.alpha, args.format)
+                                   args.alpha, args.format, args.comparison,
+                                   args.reference, args.tie_rule, args.margin,
+                                   args.test_type)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)
