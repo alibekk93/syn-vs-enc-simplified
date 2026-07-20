@@ -2,7 +2,6 @@
 
 import colorsys
 import json
-import re
 from functools import lru_cache
 from pathlib import Path
 import matplotlib.colors as mcolors
@@ -12,6 +11,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
+from src.utils import parse_filename_metadata
+
 FIGURES_DIR = Path("results/figures")
 BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
 
@@ -19,49 +20,6 @@ BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
 # ===========================================================
 # DATA LOADING
 # ===========================================================
-
-def parse_filename_metadata(filename):
-    """
-    Extract mode / model / dataset / n_bits / synth_scale from a filename or raw mode key.
-
-    Examples:
-        fhe_4__logistic_regression__heart_disease.json  → mode=fhe, n_bits=4
-        ctgan_100__rf__diabetes.json                    → mode=ctgan, synth_scale=100
-        standard__rf__diabetes.json                     → mode=standard
-        ctgan                                           → mode=ctgan  (bare JSON mode key)
-    """
-    name = Path(filename).stem
-    parts = name.split("__")
-
-    meta = {
-        "raw_name": name,
-        "mode": None,
-        "model": None,
-        "dataset": None,
-        "n_bits": None,
-        "synth_scale": None,
-    }
-
-    # FHE: fhe_N
-    fhe_match = re.match(r"fhe_(\d+)", parts[0])
-    if fhe_match:
-        meta["mode"] = "fhe"
-        meta["n_bits"] = int(fhe_match.group(1))
-        parts[0] = "fhe"
-    else:
-        # Synthetic mode with synth_scale suffix: e.g. ctgan_100, gaussian_copula_150
-        synth_match = re.match(r"^(.+)_(\d+)$", parts[0])
-        if synth_match:
-            meta["mode"] = synth_match.group(1)
-            meta["synth_scale"] = int(synth_match.group(2))
-        else:
-            meta["mode"] = parts[0]
-
-    if len(parts) >= 3:
-        meta["model"] = parts[1]
-        meta["dataset"] = parts[2]
-
-    return meta
 
 
 def load_internal_validation_bootstrap(path=BOOTSTRAP_PATH):

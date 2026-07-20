@@ -6,6 +6,7 @@ import csv
 import json
 import logging
 import random
+import re
 import numpy as np
 import yaml
 from pathlib import Path
@@ -20,6 +21,56 @@ def load_config(config_path: str) -> dict:
         raise FileNotFoundError(f"Config file not found: {path}")
     with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+# ------------------------------------------------------------------
+# Result-filename parsing. Lives here rather than in visualization.py
+# so that numpy-only consumers (src/stats_tests.py) can decompose mode
+# strings without pulling in matplotlib/seaborn/pandas.
+# ------------------------------------------------------------------
+
+def parse_filename_metadata(filename):
+    """
+    Extract mode / model / dataset / n_bits / synth_scale from a filename or raw mode key.
+
+    Examples:
+        fhe_4__logistic_regression__heart_disease.json  → mode=fhe, n_bits=4
+        ctgan_100__rf__diabetes.json                    → mode=ctgan, synth_scale=100
+        standard__rf__diabetes.json                     → mode=standard
+        ctgan                                           → mode=ctgan  (bare JSON mode key)
+    """
+    name = Path(filename).stem
+    parts = name.split("__")
+
+    meta = {
+        "raw_name": name,
+        "mode": None,
+        "model": None,
+        "dataset": None,
+        "n_bits": None,
+        "synth_scale": None,
+    }
+
+    # FHE: fhe_N
+    fhe_match = re.match(r"fhe_(\d+)", parts[0])
+    if fhe_match:
+        meta["mode"] = "fhe"
+        meta["n_bits"] = int(fhe_match.group(1))
+        parts[0] = "fhe"
+    else:
+        # Synthetic mode with synth_scale suffix: e.g. ctgan_100, gaussian_copula_150
+        synth_match = re.match(r"^(.+)_(\d+)$", parts[0])
+        if synth_match:
+            meta["mode"] = synth_match.group(1)
+            meta["synth_scale"] = int(synth_match.group(2))
+        else:
+            meta["mode"] = parts[0]
+
+    if len(parts) >= 3:
+        meta["model"] = parts[1]
+        meta["dataset"] = parts[2]
+
+    return meta
 
 
 # ------------------------------------------------------------------

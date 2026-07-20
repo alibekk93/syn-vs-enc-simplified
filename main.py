@@ -9,6 +9,7 @@ Usage:
     python main.py create-visuals
     python main.py create-multipanel-visuals
     python main.py aggregate-metrics-csv
+    python main.py paired-bootstrap-tests --metric roc_auc --modes standard 'fhe_*'
 """
 
 import argparse
@@ -187,6 +188,17 @@ def aggregate_metrics_to_csv(metrics_dir: str, output_path: str):
     logger.info("=== Aggregation complete ===")
 
 
+def run_paired_bootstrap_tests(metrics_dir: str, output, metric: str, modes,
+                               datasets, models, alpha: float, fmt: str):
+    logger.info(f"=== Paired bootstrap significance tests ({metric}) ===")
+    from src.stats_tests import run as run_stats_tests
+    run_stats_tests(
+        metrics_dir=metrics_dir, output=output, metric=metric,
+        modes=modes, datasets=datasets, models=models, alpha=alpha, fmt=fmt,
+    )
+    logger.info("=== Significance testing complete ===")
+
+
 def generate_seeds(seed: int, length: int):
     """Generate a list of random seeds and save to file."""
     random.seed(seed)
@@ -363,6 +375,66 @@ if __name__ == "__main__":
         help="Path to write the aggregated CSV file (default: results/metrics_aggregated.csv)"
     )
 
+    # ---- paired-bootstrap-tests ----
+    stats_parser = subparsers.add_parser(
+        "paired-bootstrap-tests",
+        help="Paired bootstrap significance tests on the stored replicate metrics: all "
+             "pairwise mode comparisons within each (dataset, classifier) cell, "
+             "Holm-Bonferroni corrected per cell"
+    )
+    stats_parser.add_argument(
+        "--metrics-dir",
+        default="results/metrics",
+        help="Directory containing per-run metrics JSON files (default: results/metrics)"
+    )
+    stats_parser.add_argument(
+        "--output",
+        default=None,
+        help="Path to write the results table "
+             "(default: results/stats/paired_bootstrap__{metric}.csv)"
+    )
+    stats_parser.add_argument(
+        "--metric",
+        default="roc_auc",
+        choices=["accuracy", "precision", "recall", "f1", "roc_auc"],
+        help="Metric to test (default: roc_auc)"
+    )
+    stats_parser.add_argument(
+        "--modes",
+        nargs="+",
+        default=None,
+        help="Modes to compare: exact names and/or glob patterns, e.g. "
+             "--modes standard 'fhe_*' arf_300 (default: every mode found on disk). "
+             "Quote patterns so the shell does not expand them. Filtering matters: the "
+             "Holm family is every pairwise test in a (dataset, classifier) cell, so "
+             "selecting all 32 modes means 496 tests per cell, and against the "
+             "~0.002 bootstrap p-value floor that leaves essentially no power."
+    )
+    stats_parser.add_argument(
+        "--datasets",
+        nargs="+",
+        default=None,
+        help="Datasets to include; exact names and/or globs (default: all)"
+    )
+    stats_parser.add_argument(
+        "--models",
+        nargs="+",
+        default=None,
+        help="Classifiers to include; exact names and/or globs (default: all)"
+    )
+    stats_parser.add_argument(
+        "--alpha",
+        type=float,
+        default=0.05,
+        help="Significance level for the significant_holm column (default: 0.05)"
+    )
+    stats_parser.add_argument(
+        "--format",
+        default="csv",
+        choices=["csv", "markdown", "both"],
+        help="Output format (default: csv). 'markdown'/'both' also writes a .md table."
+    )
+
     # ---- generate-seeds ----
     seeds_parser = subparsers.add_parser(
         "generate-seeds",
@@ -435,6 +507,11 @@ if __name__ == "__main__":
 
     elif args.command == "aggregate-metrics-csv":
         aggregate_metrics_to_csv(args.metrics_dir, args.output)
+
+    elif args.command == "paired-bootstrap-tests":
+        run_paired_bootstrap_tests(args.metrics_dir, args.output, args.metric,
+                                   args.modes, args.datasets, args.models,
+                                   args.alpha, args.format)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)

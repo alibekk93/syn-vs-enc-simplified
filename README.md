@@ -38,6 +38,26 @@ Two bootstrap approaches are implemented in `src/visualization.py`:
 
 **Internal validation bootstrap** (`load_internal_validation_bootstrap`) — the full training pipeline (including synthesis for synth modes) is re-run from scratch for each seed, each in its own subfolder under `results/internal_validation_bootstrap/`. Results must first be aggregated into a single JSON via `aggregate-internal-validation-bootstrap` before visualization. Each seed reflects a different resampled training set, so the distribution captures training-time variance rather than test-set variance.
 
+## Significance testing
+
+```
+python main.py paired-bootstrap-tests --metric roc_auc --modes standard 'fhe_*'
+python main.py paired-bootstrap-tests --metric roc_auc --modes standard 'fhe_*' '*_100' --format both
+python main.py paired-bootstrap-tests --datasets diabetes --models xgboost --modes standard fhe_8
+```
+
+Runs a **paired bootstrap test** on the differences between two modes' metric distributions, all pairwise within each (dataset, classifier) cell, with Holm-Bonferroni correction applied per cell. Writes `results/stats/paired_bootstrap__{metric}.csv` (add `--format both` for a companion markdown table). Any of the five metrics works via `--metric`; the default is `roc_auc`.
+
+**Why the stored results are already paired.** Every mode (standard, synthetic, FHE) is evaluated on the same real held-out test set for a given dataset, and every one calls `run_bootstrap(..., seed=42)`, which draws its resample indices from a freshly seeded `np.random.default_rng(42)`. Since the number of test rows is a property of the dataset and not of the mode, replicate *i* of any two modes was computed on the identical resampled rows. Replicate-wise differences `d_i = A_i - B_i` are therefore genuine paired differences, and no re-running of inference is needed. `src/stats_tests.py` verifies this at load time rather than assuming it: a metric array whose length disagrees with the file's declared `n_bootstrap`, or a pair whose two arrays differ in length, is dropped with an error instead of silently producing an unpaired comparison.
+
+**The p-value.** With `r = min(#{d>0}, #{d<0}) + #{d==0}` over B usable replicates, `p = min(1, 2(r+1)/(B+1))`. This is the achieved significance level read off the difference distribution, which is the dual of the percentile confidence interval, so `p < 0.05` holds exactly when the reported 95% CI of the difference excludes zero. That keeps the p-value and CI columns of a row consistent with each other and with the percentile convention already used in `aggregate-metrics-csv`. The `(r+1)/(B+1)` form floors p at about 0.002 rather than letting it reach a false zero when no replicate lands on the far side.
+
+**Ties.** Metrics are rounded to 4 decimals before storage, and ROC-AUC is intrinsically discrete on test sets of 57 to 203 rows, so exact ties (`d_i == 0`) are common. Ties are charged to the smaller of the two directional counts, which can only raise p. Quantization can therefore weaken a result but never manufacture significance. Two modes producing identical predictions fall out of the same formula as p = 1.0 with no special case. The `n_ties` column is reported so a null result driven by quantization is visible rather than hidden.
+
+**Choosing modes matters.** The Holm family is every pairwise test inside one (dataset, classifier) cell. Selecting all 32 modes means 496 tests per cell, and against the ~0.002 p-value floor almost nothing can survive correction. That is a real property of the design, not a defect, which is why `--modes`, `--datasets` and `--models` accept both exact names and glob patterns: narrow the comparison to the question being asked.
+
+No standardized effect size (Cohen's d or similar) is reported. The 1000 values are bootstrap replicates of a statistic rather than independent observations, so their spread shrinks with test-set size and any sd-standardized quantity would describe `n_test` more than it describes the effect. The mean difference with its percentile CI, alongside both group means, is reported instead.
+
 ## TD
 ### visualizations
 - mode combination legend
