@@ -1166,6 +1166,177 @@ def plot_fhe_training_breakdown_multipanel(
     plt.close()
 
 
+def plot_synth_scale_lines_multipanel(
+    df, metric="roc_auc", save_dir=FIGURES_DIR, cfg=None,
+    viz_cfg_path="config/visualization.yaml",
+):
+    """
+    IEEE double-column multipanel figure — synthesis-scale metric lines.
+
+    Layout: N_models rows × N_datasets columns.  Each panel plots `metric`
+    (default ROC-AUC) vs. synthesis scale, one line per synthesizer method
+    (orange lightness ramp, IQR band), with Real (green dashed) and FHE 8-bit
+    (blue dotted) horizontal reference bands.
+
+    Multipanel counterpart of plot_synth_scale_lines.  Two differences: synth
+    method colours are computed once from the global method set (stable shade in
+    every panel), and the single-panel's right-side inline labels are replaced by
+    a shared bottom legend (inline labels overlap badly in a dense grid).
+
+    Pass a df that retains all synth_scale values (do not pre-filter to scale=100).
+    Saved as: synth_scale_lines_{metric}_multipanel.{fmt}
+    """
+    from matplotlib.lines import Line2D
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    fig_cfg    = cfg["figures"]
+    modes_cfg  = cfg.get("modes", {})
+    groups_cfg = cfg.get("groups", {})
+
+    plt.rcParams.update({
+        "font.family": cfg["fonts"].get("family", "sans-serif"),
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+    if metric not in df.columns:
+        return
+
+    data = df.dropna(subset=[metric])
+    if data.empty:
+        return
+
+    datasets      = sorted(data["dataset"].dropna().unique())
+    models_sorted = sorted(data["model"].dropna().unique())
+    if not datasets or not models_sorted:
+        return
+
+    # Global synth-method set + stable colours (same shade for a method in every
+    # panel), unlike the single-panel version which recomputes per subset.
+    synth_all     = data[data["synth_scale"].notna()]
+    synth_methods = sorted(m for m in synth_all["mode"].unique() if m not in ("standard", "fhe"))
+
+    synth_gcfg = groups_cfg.get("synthetic", {})
+    base_color = synth_gcfg.get("base_color", "#e07b2a")
+    l_range    = synth_gcfg.get("lightness_range", [0.65, 0.38])
+    if len(synth_methods) > 1:
+        method_colors = dict(zip(synth_methods, _lightness_ramp(base_color, len(synth_methods), l_range)))
+    elif synth_methods:
+        method_colors = {synth_methods[0]: base_color}
+    else:
+        method_colors = {}
+
+    real_color = groups_cfg.get("real", {}).get("base_color", "#2ca02c")
+    fhe_color  = groups_cfg.get("fhe", {}).get("base_color", "#1f77b4")
+
+    synth_scales = sorted(synth_all["synth_scale"].dropna().unique().astype(int))
+
+    n_row    = len(models_sorted)
+    n_col    = len(datasets)
+    tick_fs  = 7
+    label_fs = 8
+
+    fig, axes = plt.subplots(
+        n_row, n_col,
+        figsize=(_IEEE_FULL_WIDTH_IN, 5.2),
+        sharex=True,
+        sharey=False,   # independent y-scale keeps small synth-scale trends visible
+        squeeze=False,
+    )
+
+    for row_idx, model in enumerate(models_sorted):
+        for col_idx, dataset in enumerate(datasets):
+            ax     = axes[row_idx, col_idx]
+            subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
+
+            synth_df = subset[subset["synth_scale"].notna()]
+            for method in synth_methods:
+                m_df = synth_df[synth_df["mode"] == method]
+                if m_df.empty:
+                    continue
+                grp = m_df.groupby("synth_scale")[metric]
+                agg = pd.DataFrame({
+                    "median": grp.median(),
+                    "q25": grp.quantile(0.25),
+                    "q75": grp.quantile(0.75),
+                }).reset_index().sort_values("synth_scale")
+                if agg.empty:
+                    continue
+                color = method_colors[method]
+                ax.plot(agg["synth_scale"], agg["median"], color=color, marker="o",
+                        linewidth=1.3, markersize=4, zorder=3)
+                ax.fill_between(agg["synth_scale"], agg["q25"], agg["q75"],
+                                color=color, alpha=0.15, zorder=1)
+
+            std_df = subset[subset["mode"] == "standard"]
+            if not std_df.empty:
+                ax.axhline(std_df[metric].median(), color=real_color,
+                           linewidth=1.3, linestyle="--", zorder=5)
+                ax.axhspan(std_df[metric].quantile(0.25), std_df[metric].quantile(0.75),
+                           color=real_color, alpha=0.10, zorder=0)
+
+            fhe_df = subset[(subset["mode"] == "fhe") & (subset["n_bits"] == 8)]
+            if not fhe_df.empty:
+                ax.axhline(fhe_df[metric].median(), color=fhe_color,
+                           linewidth=1.3, linestyle=":", zorder=5)
+                ax.axhspan(fhe_df[metric].quantile(0.25), fhe_df[metric].quantile(0.75),
+                           color=fhe_color, alpha=0.10, zorder=0)
+
+            if synth_scales:
+                ax.set_xticks(synth_scales)
+                ax.set_xticklabels([f"{s}%" for s in synth_scales])
+            ax.tick_params(labelsize=tick_fs, length=3, pad=2)
+            sns.despine(ax=ax)
+
+            if row_idx == 0:
+                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+            if row_idx == n_row - 1:
+                ax.set_xlabel("Synthesis Scale (%)", fontsize=label_fs, labelpad=3)
+            if col_idx == 0:
+                ylabel = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
+                ax.set_ylabel(ylabel, fontsize=label_fs, labelpad=3)
+                # Model row label — far left, rotated, since (a)/(b) occupies the corner
+                ax.text(-0.48, 0.5, _abbrev_model(model),
+                        transform=ax.transAxes, rotation=90,
+                        fontsize=label_fs, fontweight="bold",
+                        va="center", ha="center")
+
+            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs)
+
+    # Shared bottom legend — long method labels wrap onto two rows (ncol=4)
+    legend_fs = 7
+    handles = [
+        Line2D([0], [0], color=method_colors[m], marker="o",
+               linewidth=1.3, markersize=4,
+               label=modes_cfg.get(m, {}).get("label", m))
+        for m in synth_methods
+    ]
+    handles.append(Line2D([0], [0], color=real_color, linewidth=1.3,
+                          linestyle="--", label="Real"))
+    handles.append(Line2D([0], [0], color=fhe_color, linewidth=1.3,
+                          linestyle=":", label="FHE 8-bit"))
+    fig.legend(
+        handles=handles,
+        fontsize=legend_fs,
+        ncol=4,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        frameon=False,
+        handletextpad=0.4,
+        columnspacing=1.2,
+    )
+
+    plt.tight_layout(rect=[0, 0.10, 1, 1])
+
+    fmt       = fig_cfg["format"]
+    save_path = Path(save_dir) / f"synth_scale_lines_{metric}_multipanel.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+
 # ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
@@ -1199,3 +1370,4 @@ def generate_all_figures():
     plot_fhe_complexity_cost(df, cfg=cfg)
     plot_fhe_training_breakdown_multipanel(df, cfg=cfg)
     plot_fhe_complexity_cost_multipanel(df, cfg=cfg)
+    plot_synth_scale_lines_multipanel(df_all, cfg=cfg)   # df_all keeps all synth_scale
