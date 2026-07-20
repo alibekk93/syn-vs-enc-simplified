@@ -1289,7 +1289,12 @@ def plot_synth_scale_lines_multipanel(
 
             if synth_scales:
                 ax.set_xticks(synth_scales)
-                ax.set_xticklabels([f"{s}%" for s in synth_scales])
+                # Label only the endpoints — interior ticks keep their marks but no
+                # text, so the narrow IEEE-width panels don't crowd with "%" labels.
+                endpoints = {synth_scales[0], synth_scales[-1]}
+                ax.set_xticklabels(
+                    [f"{s}%" if s in endpoints else "" for s in synth_scales]
+                )
             ax.tick_params(labelsize=tick_fs, length=3, pad=2)
             sns.despine(ax=ax)
 
