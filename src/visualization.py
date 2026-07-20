@@ -882,8 +882,8 @@ _MODEL_ABBREV = {
     "mlp": "MLP",
 }
 
-# Short x-tick codes for dense mode axes (violin multipanel). The full names go in a
-# shared legend; these keep the axis readable at ~0.5in per slot.
+# Short x-tick codes for dense mode axes (violin multipanel) — keep the axis readable
+# at ~0.5in per slot without overlapping full names.
 _MODE_SHORT = {
     "standard": "Real",
     "arf": "ARF",
@@ -903,9 +903,9 @@ def _abbrev_model(name: str) -> str:
 
 
 def _mode_short_code(mode_key: str) -> str:
-    """Short x-tick code for a mode_key (full name lives in the legend)."""
+    """Short x-tick code for a mode_key."""
     if mode_key.startswith("fhe_"):
-        return "F" + mode_key.split("_")[1]        # fhe_8 -> F8
+        return "FHE-" + mode_key.split("_")[1]     # fhe_8 -> FHE-8
     if mode_key in _MODE_SHORT:
         return _MODE_SHORT[mode_key]
     return "".join(w[0] for w in mode_key.split("_")).upper()  # fallback initials
@@ -1393,18 +1393,14 @@ def plot_violinplot_multipanel(
     FHE bit-widths) on the x-axis, coloured by group with vertical group separators.
     Violins only (no strip dots).
 
-    The mode axis carries short codes (Real, ARF, BN, CTGAN, GC, NF, F2…F12) since the
-    full names overlap at IEEE width; a shared bottom legend decodes them, styled like
-    the other multipanels. Mode colours/order are computed once from the global mode
-    set, so every dataset file is directly comparable and the legend order matches the
-    x-axis.
+    The mode axis carries short codes (Real, ARF, BN, CTGAN, GC, NF, FHE-2…FHE-12)
+    since the full names overlap at IEEE width. Mode colours/order are computed once
+    from the global mode set, so every dataset file is directly comparable.
 
     Canonical scale-100 view: synthesizer rows are filtered to synth_scale == 100 so
     each synthesizer contributes a single violin (matches how the single-panel violins
     are generated). Saved as: violinplot_{metric}_multipanel__{dataset}.{fmt}
     """
-    from matplotlib.patches import Patch
-
     if cfg is None:
         cfg = _load_viz_config(viz_cfg_path)
 
@@ -1442,14 +1438,13 @@ def plot_violinplot_multipanel(
     n_mode    = len(order)
     tick_fs   = 7
     label_fs  = 8
-    legend_fs = 7
     fmt       = fig_cfg["format"]
     ylabel    = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
 
     for dataset in datasets:
         # Taller panels than the cramped first cut; extra top/bottom room for the
-        # suptitle and the codes + shared legend.
-        fig_h = n_model * 1.9 + 1.3
+        # suptitle and the horizontal x-codes.
+        fig_h = n_model * 1.9 + 0.9
         fig, axes = plt.subplots(
             n_model, 1,
             figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
@@ -1457,12 +1452,12 @@ def plot_violinplot_multipanel(
             squeeze=False,
         )
         # Reserve margins in absolute inches (predictable without a local render):
-        # left = y-ticks + supylabel, top = suptitle, bottom = codes + 3-row legend.
+        # left = y-ticks + supylabel, top = suptitle, bottom = horizontal x-codes.
         fig.subplots_adjust(
             left=0.85 / _IEEE_FULL_WIDTH_IN,
             right=0.99,
             top=1 - 0.5 / fig_h,     # room for suptitle + top panel's (a) tag
-            bottom=1.15 / fig_h,     # room for x-codes + 3-row legend
+            bottom=0.45 / fig_h,     # room for horizontal x-codes
         )
 
         for mi, model in enumerate(models_sorted):
@@ -1492,21 +1487,6 @@ def plot_violinplot_multipanel(
 
         fig.suptitle(_fmt_dataset(dataset), fontsize=label_fs + 1, fontweight="bold")
         fig.supylabel(ylabel, fontsize=label_fs)   # single shared y-axis label
-        # Shared legend decoding the x-tick codes; order/colours match the x-axis.
-        legend_handles = [
-            Patch(facecolor=color_map[lbl], alpha=violin_cfg["alpha"], label=lbl)
-            for lbl in order
-        ]
-        fig.legend(
-            handles=legend_handles,
-            loc="lower center",
-            bbox_to_anchor=(0.5, 0.0),
-            ncol=4,
-            frameon=False,
-            fontsize=legend_fs,
-            handletextpad=0.4,
-            columnspacing=1.2,
-        )
 
         save_path = Path(save_dir) / f"violinplot_{metric}_multipanel__{dataset}.{fmt}"
         save_path.parent.mkdir(parents=True, exist_ok=True)
