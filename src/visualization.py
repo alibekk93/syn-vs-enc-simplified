@@ -890,11 +890,18 @@ def _abbrev_model(name: str) -> str:
     return _MODEL_ABBREV.get(name, name.replace("_", " ").title())
 
 
-def _add_panel_label(ax, idx: int, fontsize: int = 8):
-    """Bold (a), (b), … label at the upper-left of an axes panel."""
+def _add_panel_label(ax, idx: int, fontsize: int = 8, x: float = -0.14, suffix: str = ""):
+    """
+    Bold (a), (b), … label at the upper-left of an axes panel.
+
+    x       : horizontal offset in axes coords. Use a smaller magnitude for
+              full-width single-column panels than for narrow grid panels.
+    suffix  : optional text appended after the letter, e.g. a model tag → "(a) LR".
+    """
     letter = chr(ord("a") + idx)
+    text = f"({letter}) {suffix}" if suffix else f"({letter})"
     ax.text(
-        -0.14, 1.05, f"({letter})",
+        x, 1.05, text,
         transform=ax.transAxes,
         fontsize=fontsize, fontweight="bold",
         va="bottom", ha="left",
@@ -1352,22 +1359,131 @@ def plot_synth_scale_lines_multipanel(
     plt.close()
 
 
+def plot_violinplot_multipanel(
+    df, metric="f1", save_dir=FIGURES_DIR, cfg=None,
+    viz_cfg_path="config/visualization.yaml",
+):
+    """
+    IEEE full-width multipanel figure — per-mode metric violin distributions.
+
+    Layout: a single vertical column of violin panels, one per (dataset, model),
+    grouped into dataset blocks with a wide gap between blocks and a tight gap
+    between the models inside a block. Each panel plots `metric` (default F1)
+    bootstrap distributions across all modes (Real, synthesizers, FHE bit-widths)
+    on the x-axis, coloured by group with vertical group separators.
+
+    Multipanel counterpart of plot_violinplot. Differences: mode colours/order are
+    computed once from the global mode set (stable in every panel); mode x-tick
+    labels appear only on the bottom panel of each dataset block; and no legend is
+    drawn — the modes are the x-axis, exactly as in the single-panel version.
+
+    Canonical scale-100 view: synthesizer rows are filtered to synth_scale == 100 so
+    each synthesizer contributes a single violin (matches how the single-panel
+    violins are generated). Saved as: violinplot_{metric}_multipanel.{fmt}
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    violin_cfg = cfg["violinplot"]
+    fig_cfg    = cfg["figures"]
+
+    _apply_publication_style(cfg)
+
+    if metric not in df.columns:
+        return
+
+    # Canonical scale-100 view: one violin per synthesizer (drop 150/300 variants).
+    df = df[df["synth_scale"].isna() | (df["synth_scale"] == 100)].copy()
+    df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
+
+    data = df.dropna(subset=[metric])
+    if data.empty:
+        return
+
+    datasets      = sorted(data["dataset"].dropna().unique())
+    models_sorted = sorted(data["model"].dropna().unique())
+    if not datasets or not models_sorted:
+        return
+
+    # Global mode display — identical colours/order in every panel (mirrors the
+    # stable-colour approach in plot_synth_scale_lines_multipanel).
+    all_keys = data["mode_key"].unique()
+    label_map, color_map, label_group_map = _build_mode_display(cfg, all_keys)
+    order = [label_map[k] for k in _sort_raw_keys(all_keys)]
+    data = data.copy()
+    data["mode_label"] = data["mode_key"].map(label_map)
+
+    n_dataset = len(datasets)
+    n_model   = len(models_sorted)
+    n_mode    = len(order)
+    tick_fs   = 7
+    label_fs  = 8
+
+    # Tall, full-page-class figure: one full-width row per (dataset, model) panel.
+    fig_h = n_dataset * n_model * 1.15 + n_dataset * 0.25 + 0.5
+    fig   = plt.figure(figsize=(_IEEE_FULL_WIDTH_IN, fig_h))
+    # Nested gridspec: wide gap between dataset blocks, tight gap between models.
+    outer = fig.add_gridspec(n_dataset, 1, hspace=0.65)
+
+    ylabel = "F1" if metric == "f1" else format_metric_name(metric)
+
+    for di, dataset in enumerate(datasets):
+        inner = outer[di].subgridspec(n_model, 1, hspace=0.10)
+        for mi, model in enumerate(models_sorted):
+            ax     = fig.add_subplot(inner[mi])
+            subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
+
+            if not subset.empty:
+                _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg)
+                _add_group_separators(ax, order, label_group_map, cfg, show_labels=False)
+
+            ax.set_xlim(-0.5, n_mode - 0.5)
+            ax.set_xlabel("")
+            ax.set_ylabel(ylabel, fontsize=label_fs, labelpad=3)
+            ax.tick_params(labelsize=tick_fs, length=3, pad=2)
+
+            # Dataset block header above the block's top panel.
+            if mi == 0:
+                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs + 1,
+                             fontweight="bold", pad=6)
+
+            # Panel letter + model tag, e.g. "(a) LR" (small left offset for the
+            # full-width panels; the model row label is folded into it here).
+            _add_panel_label(ax, di * n_model + mi, fontsize=label_fs,
+                             x=-0.045, suffix=_abbrev_model(model))
+
+            # Mode x-tick labels only on the bottom panel of each dataset block.
+            if mi == n_model - 1:
+                ax.set_xticks(range(n_mode))
+                ax.set_xticklabels(order, rotation=20, ha="right", fontsize=tick_fs)
+            else:
+                ax.tick_params(labelbottom=False)
+
+    fmt       = fig_cfg["format"]
+    save_path = Path(save_dir) / f"violinplot_{metric}_multipanel.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close()
+
+
 # ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
 def _render_multipanel_figures(df_all, cfg):
     """
-    Render the three IEEE multipanel figures from an unfiltered dataframe.
+    Render the IEEE multipanel figures from an unfiltered dataframe.
 
     FHE rows carry no synth_scale, so the two FHE panels are unaffected by scale
-    filtering; the synth-scale panel needs every scale (100/150/300). Passing the
-    full df_all to all three therefore keeps behaviour identical while avoiding a
+    filtering; the synth-scale panel needs every scale (100/150/300); and the violin
+    panel applies its own canonical scale-100 filter internally. Passing the full
+    df_all to all of them therefore keeps behaviour identical while avoiding a
     separate pre-filtered frame.
     """
     plot_fhe_training_breakdown_multipanel(df_all, cfg=cfg)
     plot_fhe_complexity_cost_multipanel(df_all, cfg=cfg)
     plot_synth_scale_lines_multipanel(df_all, cfg=cfg)
+    plot_violinplot_multipanel(df_all, metric="f1", cfg=cfg)
 
 
 def generate_all_figures():
