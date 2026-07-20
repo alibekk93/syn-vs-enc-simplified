@@ -555,8 +555,10 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
 _FHE_MARKERS = ["o", "s", "^", "D", "v", "P"]
 
-# Per-model complexity-cost lines are all one colour (the FHE base blue — that plot is
-# entirely FHE); models are told apart by marker (_FHE_MARKERS), not colour.
+# Fallback per-model line colours for the complexity-cost plots (config:
+# `model_line_colors`). That figure shows no modes, so this palette is deliberately
+# independent of the mode colours — one colour per model, plus a distinct marker.
+_MODEL_COLORS = ["#0072b2", "#d55e00", "#009e73", "#cc79a7", "#e69f00"]
 
 
 def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
@@ -689,9 +691,9 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
 
         models_sorted = sorted(agg["model"].unique())
         n_bits_sorted = sorted(agg["n_bits"].unique())
-        line_color    = _mode_color(cfg, "fhe_8")   # FHE base blue; this plot is all-FHE
+        model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
         model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-        model_colors  = {m: line_color for m in models_sorted}   # markers distinguish models
+        model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
 
         panels = [
             ("fhe_compile_time",    "Compile Time (s)"),
@@ -999,9 +1001,9 @@ def plot_fhe_complexity_cost_multipanel(
     n_bits_sorted = sorted(full_agg["n_bits"].unique())
     n_col         = len(datasets)
 
-    line_color    = _mode_color(cfg, "fhe_8")   # FHE base blue; this plot is all-FHE
+    model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
     model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
-    model_colors  = {m: line_color for m in models_sorted}   # markers distinguish models
+    model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
 
     panels = [
         ("fhe_compile_time",    "Compile Time (s)"),

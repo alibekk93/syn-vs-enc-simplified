@@ -44,7 +44,7 @@ modes:
   nflow:
     label: "Normalizing Flow"
     group: synthetic
-    color: "#8c564b"        # brown
+    color: "#0072b2"        # blue (swapped with FHE — was too close to CTGAN)
   arf:
     label: "ARF"
     group: synthetic
@@ -66,12 +66,16 @@ groups:
     base_color: "#e07b2a"    # fallback only; per-method colors are set under `modes`
   fhe:
     label: "FHE"
-    base_color: "#0072b2"    # Okabe-Ito blue
+    base_color: "#8c564b"    # brown (swapped with Normalizing Flow)
     lightness_range: [0.72, 0.32]   # FHE keeps lightness shading by bit-width
+
+# Per-model line colors for the FHE complexity-cost plots. That figure contains no
+# mode colors, so this palette is independent of the mode colors above.
+model_line_colors: ["#0072b2", "#d55e00", "#009e73", "#cc79a7", "#e69f00"]
 
 # FHE training-time breakdown segment colors.
 fhe_breakdown:
-  fit_color: "#cccccc"            # "fit" segment (compile segment uses the FHE blue ramp)
+  fit_color: "#cccccc"            # "fit" segment (compile segment uses the FHE shade ramp)
   group_divider_color: "#dddddd"  # thin separator between model groups (multipanel)
 
 # Vertical separator lines drawn between mode groups on boxplots.
