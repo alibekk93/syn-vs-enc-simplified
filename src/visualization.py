@@ -902,6 +902,22 @@ def _add_panel_label(ax, idx: int, fontsize: int = 8):
     )
 
 
+def _apply_publication_style(cfg):
+    """
+    Apply the shared seaborn style/context + IEEE-friendly rcParams used by every
+    multipanel figure. Keeps each function self-contained (no reliance on global
+    state left by a previously drawn figure) and consistent with the single-panel
+    setup. fonttype 42 keeps text editable in Illustrator/Inkscape.
+    """
+    sns.set_style(cfg.get("style", "white"))
+    sns.set_context(cfg.get("context", "paper"))
+    plt.rcParams.update({
+        "font.family": cfg["fonts"].get("family", "sans-serif"),
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+
 def plot_fhe_complexity_cost_multipanel(
     df, save_dir=FIGURES_DIR, cfg=None, viz_cfg_path="config/visualization.yaml"
 ):
@@ -923,11 +939,7 @@ def plot_fhe_complexity_cost_multipanel(
 
     fig_cfg = cfg["figures"]
 
-    plt.rcParams.update({
-        "font.family": cfg["fonts"].get("family", "sans-serif"),
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    _apply_publication_style(cfg)
 
     needed   = ["n_bits", "fhe_compile_time", "inf_time_per_sample"]
     agg_cols = ["fhe_compile_time", "inf_time_per_sample"]
@@ -962,9 +974,8 @@ def plot_fhe_complexity_cost_multipanel(
         figsize=(_IEEE_FULL_WIDTH_IN, 3.6),
         sharex="col",  # same n_bits x-axis per column (same for all datasets, but keeps ticks tidy)
         sharey=False,  # independent y-scale per panel
+        squeeze=False,
     )
-    if n_col == 1:
-        axes = axes.reshape(2, 1)
 
     for col_idx, dataset in enumerate(datasets):
         d_agg = full_agg[full_agg["dataset"] == dataset]
@@ -1047,11 +1058,7 @@ def plot_fhe_training_breakdown_multipanel(
     fig_cfg = cfg["figures"]
     fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
 
-    plt.rcParams.update({
-        "font.family": cfg["fonts"].get("family", "sans-serif"),
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    _apply_publication_style(cfg)
 
     fhe_df = df[df["mode"] == "fhe"].dropna(
         subset=["fhe_fit_time", "fhe_compile_time", "n_bits"]
@@ -1093,9 +1100,8 @@ def plot_fhe_training_breakdown_multipanel(
         1, n_col,
         figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
         sharey=True,
+        squeeze=False,
     )
-    if n_col == 1:
-        axes = [axes]
 
     def _safe_val(lookup, cat, col):
         row = lookup.get(cat)
@@ -1105,7 +1111,7 @@ def plot_fhe_training_breakdown_multipanel(
         return float(v) if pd.notna(v) else 0.0
 
     for col_idx, dataset in enumerate(datasets):
-        ax    = axes[col_idx]
+        ax    = axes[0, col_idx]
         d_agg = full_agg[full_agg["dataset"] == dataset]
         d_lut = {(r["model"], int(r["n_bits"])): r for _, r in d_agg.iterrows()}
 
@@ -1125,14 +1131,14 @@ def plot_fhe_training_breakdown_multipanel(
         _add_panel_label(ax, col_idx, fontsize=label_fs)
 
     # y-tick labels only on leftmost panel (sharey hides the rest automatically)
-    axes[0].set_yticks(y_pos)
-    axes[0].set_yticklabels(y_labels_left, fontsize=tick_fs)
-    for ax in axes:
+    axes[0, 0].set_yticks(y_pos)
+    axes[0, 0].set_yticklabels(y_labels_left, fontsize=tick_fs)
+    for ax in axes.flat:
         ax.set_ylim(-0.5, n_bars - 0.5)
 
     # Thin horizontal separators between model groups
     n_per_model = len(n_bits_sorted)
-    for ax in axes:
+    for ax in axes.flat:
         for i in range(len(models_sorted) - 1):
             ax.axhline(
                 (i + 1) * n_per_model - 0.5,
@@ -1142,18 +1148,19 @@ def plot_fhe_training_breakdown_multipanel(
     # Simplified shared legend — y-axis labels already encode model + n_bits,
     # so individual per-precision colour patches are redundant.  Show only the
     # two segment types; caption can note that darker shade = higher bit-width.
+    legend_fs = 7
     _mid_nb = n_bits_sorted[len(n_bits_sorted) // 2]
     fit_handle     = Patch(color="#cccccc", label="Fit")
     compile_handle = Patch(color=nbits_color[_mid_nb],
                            label="Compile  (light→dark: low→high bits)")
     fig.legend(
         handles=[fit_handle, compile_handle],
-        fontsize=7,
+        fontsize=legend_fs,
         ncol=2,
         loc="lower center",
         bbox_to_anchor=(0.5, 0.0),
         frameon=False,
-        handletextpad=0.3,
+        handletextpad=0.4,
         columnspacing=1.0,
     )
 
@@ -1195,11 +1202,7 @@ def plot_synth_scale_lines_multipanel(
     modes_cfg  = cfg.get("modes", {})
     groups_cfg = cfg.get("groups", {})
 
-    plt.rcParams.update({
-        "font.family": cfg["fonts"].get("family", "sans-serif"),
-        "pdf.fonttype": 42,
-        "ps.fonttype": 42,
-    })
+    _apply_publication_style(cfg)
 
     if metric not in df.columns:
         return
@@ -1341,6 +1344,20 @@ def plot_synth_scale_lines_multipanel(
 # MAIN ENTRYPOINT
 # ===========================================================
 
+def _render_multipanel_figures(df_all, cfg):
+    """
+    Render the three IEEE multipanel figures from an unfiltered dataframe.
+
+    FHE rows carry no synth_scale, so the two FHE panels are unaffected by scale
+    filtering; the synth-scale panel needs every scale (100/150/300). Passing the
+    full df_all to all three therefore keeps behaviour identical while avoiding a
+    separate pre-filtered frame.
+    """
+    plot_fhe_training_breakdown_multipanel(df_all, cfg=cfg)
+    plot_fhe_complexity_cost_multipanel(df_all, cfg=cfg)
+    plot_synth_scale_lines_multipanel(df_all, cfg=cfg)
+
+
 def generate_all_figures():
     FIGURES_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -1368,6 +1385,21 @@ def generate_all_figures():
 
     plot_fhe_training_breakdown(df, cfg=cfg)
     plot_fhe_complexity_cost(df, cfg=cfg)
-    plot_fhe_training_breakdown_multipanel(df, cfg=cfg)
-    plot_fhe_complexity_cost_multipanel(df, cfg=cfg)
-    plot_synth_scale_lines_multipanel(df_all, cfg=cfg)   # df_all keeps all synth_scale
+    _render_multipanel_figures(df_all, cfg)
+
+
+def generate_multipanel_figures():
+    """
+    Regenerate only the IEEE multipanel figures.
+
+    Skips the per-(dataset, model, metric) violin and synth-scale single-panel
+    plots, so it is fast when iterating on multipanel layout/style alone.
+    """
+    FIGURES_DIR.mkdir(parents=True, exist_ok=True)
+
+    cfg = _load_viz_config()
+
+    df_all = load_simple_bootstrap()
+    df_all = df_all.dropna(how="all")
+
+    _render_multipanel_figures(df_all, cfg)
