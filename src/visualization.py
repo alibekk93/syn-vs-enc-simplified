@@ -403,8 +403,8 @@ def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True):
             )
 
 
-def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg):
-    """Render violinplot + stripplot onto ax. subset must have a 'mode_label' column."""
+def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg, show_strip=True):
+    """Render violinplot (+ optional stripplot) onto ax. subset must have a 'mode_label' column."""
     sns.violinplot(
         data=subset,
         x="mode_label",
@@ -423,7 +423,33 @@ def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg):
     for collection in ax.collections:
         collection.set_alpha(violin_cfg["alpha"])
 
-    sns.stripplot(
+    if show_strip:
+        sns.stripplot(
+            data=subset,
+            x="mode_label",
+            y=metric,
+            hue="mode_label",
+            hue_order=order,
+            order=order,
+            palette=color_map,
+            dodge=False,
+            alpha=violin_cfg["strip_alpha"],
+            size=violin_cfg["strip_size"],
+            legend=False,
+            ax=ax,
+        )
+
+    if violin_cfg.get("despine", True):
+        sns.despine(ax=ax)
+
+    grid_alpha = violin_cfg.get("grid_alpha", 0.0)
+    if grid_alpha > 0:
+        ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
+
+
+def _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg):
+    """Render boxplot onto ax (no outlier dots). subset must have a 'mode_label' column."""
+    sns.boxplot(
         data=subset,
         x="mode_label",
         y=metric,
@@ -431,17 +457,21 @@ def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg):
         hue_order=order,
         order=order,
         palette=color_map,
-        dodge=False,
-        alpha=violin_cfg["strip_alpha"],
-        size=violin_cfg["strip_size"],
+        linewidth=box_cfg["linewidth"],
+        notch=box_cfg.get("notch", False),
+        showmeans=box_cfg.get("showmeans", False),
+        showfliers=False,          # no outlier dots — matches the no-dots aesthetic
         legend=False,
         ax=ax,
     )
 
-    if violin_cfg.get("despine", True):
+    for patch in ax.patches:
+        patch.set_alpha(box_cfg.get("alpha", 0.65))
+
+    if box_cfg.get("despine", True):
         sns.despine(ax=ax)
 
-    grid_alpha = violin_cfg.get("grid_alpha", 0.0)
+    grid_alpha = box_cfg.get("grid_alpha", 0.0)
     if grid_alpha > 0:
         ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
 
@@ -1359,40 +1389,33 @@ def plot_synth_scale_lines_multipanel(
     plt.close()
 
 
-def plot_violinplot_multipanel(
-    df, metric="f1", save_dir=FIGURES_DIR, cfg=None,
-    viz_cfg_path="config/visualization.yaml",
-):
+def _plot_distribution_multipanel(df, metric, draw_panel, filename_prefix, save_dir, cfg):
     """
-    IEEE full-width multipanel figure — per-mode metric violin distributions.
+    Shared engine for the vertical, dataset-grouped distribution multipanels
+    (violin / box).
 
-    Layout: a single vertical column of violin panels, one per (dataset, model),
-    grouped into dataset blocks with a wide gap between blocks and a tight gap
-    between the models inside a block. Each panel plots `metric` (default F1)
-    bootstrap distributions across all modes (Real, synthesizers, FHE bit-widths)
-    on the x-axis, coloured by group with vertical group separators.
+    Layout: a single full-width column with one panel per (dataset, model), grouped
+    into dataset blocks — a wide gap between blocks and a tight gap between the models
+    inside a block. `draw_panel(ax, subset, metric, order, color_map)` renders one
+    panel's marks; everything else (ordering, labels, group separators, saving) is
+    common, so the violin and box figures stay identical in style.
 
-    Multipanel counterpart of plot_violinplot. Differences: mode colours/order are
-    computed once from the global mode set (stable in every panel); mode x-tick
-    labels appear only on the bottom panel of each dataset block; and no legend is
-    drawn — the modes are the x-axis, exactly as in the single-panel version.
+    Mode colours/order are computed once from the global mode set (stable in every
+    panel); mode x-tick labels appear only on the bottom panel of each dataset block;
+    no legend is drawn — the modes are the x-axis, as in the single-panel versions.
 
     Canonical scale-100 view: synthesizer rows are filtered to synth_scale == 100 so
-    each synthesizer contributes a single violin (matches how the single-panel
-    violins are generated). Saved as: violinplot_{metric}_multipanel.{fmt}
+    each synthesizer contributes a single mark (matches how the single-panel figures
+    are generated). Saved as: {filename_prefix}_{metric}_multipanel.{fmt}
     """
-    if cfg is None:
-        cfg = _load_viz_config(viz_cfg_path)
-
-    violin_cfg = cfg["violinplot"]
-    fig_cfg    = cfg["figures"]
+    fig_cfg = cfg["figures"]
 
     _apply_publication_style(cfg)
 
     if metric not in df.columns:
         return
 
-    # Canonical scale-100 view: one violin per synthesizer (drop 150/300 variants).
+    # Canonical scale-100 view: one mark per synthesizer (drop 150/300 variants).
     df = df[df["synth_scale"].isna() | (df["synth_scale"] == 100)].copy()
     df["mode_key"] = df.apply(lambda r: _raw_mode_key(r["mode"], r["n_bits"]), axis=1)
 
@@ -1434,7 +1457,7 @@ def plot_violinplot_multipanel(
             subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
 
             if not subset.empty:
-                _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg)
+                draw_panel(ax, subset, metric, order, color_map)
                 _add_group_separators(ax, order, label_group_map, cfg, show_labels=False)
 
             ax.set_xlim(-0.5, n_mode - 0.5)
@@ -1460,10 +1483,54 @@ def plot_violinplot_multipanel(
                 ax.tick_params(labelbottom=False)
 
     fmt       = fig_cfg["format"]
-    save_path = Path(save_dir) / f"violinplot_{metric}_multipanel.{fmt}"
+    save_path = Path(save_dir) / f"{filename_prefix}_{metric}_multipanel.{fmt}"
     save_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(save_path, format=fmt, bbox_inches="tight")
     plt.close()
+
+
+def plot_violinplot_multipanel(
+    df, metric="f1", save_dir=FIGURES_DIR, cfg=None,
+    viz_cfg_path="config/visualization.yaml",
+):
+    """
+    IEEE full-width multipanel figure — per-mode metric violin distributions.
+
+    Vertical column of violin panels, one per (dataset, model), grouped into dataset
+    blocks. Violins only (no strip dots). Multipanel counterpart of plot_violinplot;
+    see _plot_distribution_multipanel for the shared layout/ordering logic.
+    Saved as: violinplot_{metric}_multipanel.{fmt}
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+    violin_cfg = cfg["violinplot"]
+
+    def _draw(ax, subset, metric, order, color_map):
+        _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg,
+                               show_strip=False)
+
+    _plot_distribution_multipanel(df, metric, _draw, "violinplot", save_dir, cfg)
+
+
+def plot_boxplot_multipanel(
+    df, metric="f1", save_dir=FIGURES_DIR, cfg=None,
+    viz_cfg_path="config/visualization.yaml",
+):
+    """
+    IEEE full-width multipanel figure — per-mode metric box distributions.
+
+    Box (whisker) counterpart of plot_violinplot_multipanel: same vertical,
+    dataset-grouped layout and ordering, with boxplots (no outlier dots) instead of
+    violins. Saved as: boxplot_{metric}_multipanel.{fmt}
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+    box_cfg = cfg["boxplot"]
+
+    def _draw(ax, subset, metric, order, color_map):
+        _draw_boxplot_panel(ax, subset, metric, order, color_map, box_cfg)
+
+    _plot_distribution_multipanel(df, metric, _draw, "boxplot", save_dir, cfg)
 
 
 # ===========================================================
@@ -1484,6 +1551,7 @@ def _render_multipanel_figures(df_all, cfg):
     plot_fhe_complexity_cost_multipanel(df_all, cfg=cfg)
     plot_synth_scale_lines_multipanel(df_all, cfg=cfg)
     plot_violinplot_multipanel(df_all, metric="f1", cfg=cfg)
+    plot_boxplot_multipanel(df_all, metric="f1", cfg=cfg)
 
 
 def generate_all_figures():
