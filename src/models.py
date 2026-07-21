@@ -102,9 +102,10 @@ class Model:
         self.mode      = mode
         self.device    = device or all_cfg.get("device", "cpu")
 
-        output_cfg       = all_cfg.get("output", {})
-        self.results_dir = Path(output_cfg.get("results_dir", "results"))
-        self.models_dir  = Path(output_cfg.get("models_dir", "models"))
+        output_cfg           = all_cfg.get("output", {})
+        self.results_dir     = Path(output_cfg.get("results_dir", "results"))
+        self.models_dir      = Path(output_cfg.get("models_dir", "models"))
+        self.predictions_dir = Path(output_cfg.get("predictions_dir", "results/predictions"))
 
         hyperparams = self.model_cfg.get("hyperparameters") or {}
         if self.device == "cuda":

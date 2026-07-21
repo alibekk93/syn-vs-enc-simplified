@@ -76,6 +76,10 @@ def _create_internal_validation_bootstrap_configs(seed: int, datasets: list[str]
         base_models["output"] = {}
     base_models["output"]["results_dir"] = f"results/internal_validation_bootstrap/{seed}/metrics"
     base_models["output"]["models_dir"]  = f"models/internal_validation_bootstrap/{seed}"
+    # Must be namespaced per seed like the two above — predictions are written
+    # per (mode, model, dataset), so without this every seed would overwrite the
+    # previous seed's files and only the last one would survive.
+    base_models["output"]["predictions_dir"] = f"results/internal_validation_bootstrap/{seed}/predictions"
 
     model_config_path = tmp_dir / "models.yaml"
     with open(model_config_path, 'w') as f:

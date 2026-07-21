@@ -81,9 +81,10 @@ class FHEModel:
         else:
             self.mode = mode
 
-        output_cfg       = all_cfg.get("output", {})
-        self.results_dir = Path(output_cfg.get("results_dir", "results"))
-        self.models_dir  = Path(output_cfg.get("models_dir", "models"))
+        output_cfg           = all_cfg.get("output", {})
+        self.results_dir     = Path(output_cfg.get("results_dir", "results"))
+        self.models_dir      = Path(output_cfg.get("models_dir", "models"))
+        self.predictions_dir = Path(output_cfg.get("predictions_dir", "results/predictions"))
 
         hyperparams = self._prepare_hyperparams(name, self.model_cfg.get("hyperparameters") or {})
         self.model  = SUPPORTED_MODELS[name](**hyperparams)

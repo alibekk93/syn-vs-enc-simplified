@@ -23,8 +23,16 @@
 #   Supported: accuracy, precision, recall, f1, roc_auc
 #
 # OUTPUT:
-#   results_dir   Where to save per-model metric JSONs
-#   models_dir    Where to save serialized model files (.joblib)
+#   results_dir      Where to save per-model metric JSONs
+#   models_dir       Where to save serialized model files (.joblib)
+#   predictions_dir  Where to save per-sample prediction JSONs (y_true,
+#                    y_proba, y_pred for the test split). Written for every
+#                    run so ROC/PR curves can be built afterwards without
+#                    re-running inference. Kept separate from results_dir
+#                    because load_simple_bootstrap() infers the bootstrap
+#                    iteration count from the list lengths inside a metrics
+#                    file's `metrics` object — a per-sample array stored there
+#                    would be read as a metric and corrupt that count.
 #
 # DEVICE:
 #   "cpu" or "cuda" — only applied to GPU_CAPABLE_MODELS in models.py
@@ -79,3 +87,4 @@ metrics:
 output:
   results_dir: results/metrics
   models_dir: models
+  predictions_dir: results/predictions

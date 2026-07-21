@@ -194,9 +194,12 @@ def run(
                 # ------------------------
                 profiler.start_memory_sampling(phase="inference")
 
+                # Single pass: labels are derived from the probabilities rather
+                # than costing a second full evaluation of the circuit.
                 with profiler.inference_block(len(model.X_test)) as inf:
-                    y_pred  = model.predict(model.X_test, fhe=fhe_mode)
-                    y_proba = model.predict_proba(model.X_test, fhe=fhe_mode)
+                    y_pred, y_proba = bootstrap_utils.predict_once(
+                        model, model.X_test, fhe=fhe_mode
+                    )
 
                 profiler.stop_memory_sampling()
 
@@ -222,6 +225,13 @@ def run(
                     path=model.results_dir / f"{model.mode}__{model_name}__{dataset_name}__test__metrics.json",
                     mode=model.mode, model_name=model_name, dataset_name=dataset_name,
                     split="test", metrics=metrics_to_save, n_bootstrap=n_bootstrap,
+                    extra_fields={"fhe": fhe_mode, "n_bits": n_bits_for_model},
+                )
+
+                bootstrap_utils.save_predictions_json(
+                    path=model.predictions_dir / f"{model.mode}__{model_name}__{dataset_name}__test__predictions.json",
+                    mode=model.mode, model_name=model_name, dataset_name=dataset_name,
+                    split="test", y_true=model.y_test, y_proba=y_proba, y_pred=y_pred,
                     extra_fields={"fhe": fhe_mode, "n_bits": n_bits_for_model},
                 )
 
