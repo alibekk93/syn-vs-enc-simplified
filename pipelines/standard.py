@@ -1,7 +1,6 @@
 """Standard training pipeline — trains and evaluates models on processed data."""
 
 import logging
-import time
 from src.utils import load_config, require_device
 from src.models import Model, SUPPORTED_METRICS
 from src.resource_profiling import ResourceProfiler
@@ -83,12 +82,10 @@ def run(
 
                 profiler.start_memory_sampling(phase="inference")
 
-                start   = time.time()
-                y_pred  = model.predict(model.X_test)
-                y_proba = model.predict_proba(model.X_test)
-                end     = time.time()
+                with profiler.inference_block(len(model.X_test)):
+                    y_pred  = model.predict(model.X_test)
+                    y_proba = model.predict_proba(model.X_test)
 
-                profiler.log_inference(end - start, len(model.X_test))
                 profiler.stop_memory_sampling()
 
                 metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)

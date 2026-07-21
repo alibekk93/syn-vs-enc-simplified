@@ -15,7 +15,13 @@
 #     enabled      Track wall-clock time for training blocks and inference.
 #
 #   memory:
-#     enabled      Track memory usage (RSS sampling + fallback tracing).
+#     enabled      Track memory usage (background RSS sampling).
+#     interval     Ceiling for the sampling interval, in seconds.
+#     min_interval Interval the sampler starts at. It backs off geometrically
+#                  from min_interval up to interval, so a sub-second phase
+#                  (e.g. a warm FHE compile) still yields enough samples to
+#                  average, while a multi-minute inference phase settles to
+#                  the coarser rate instead of accumulating samples endlessly.
 #
 #   storage:
 #     enabled      Track model/data file sizes and derived ratios.
@@ -34,8 +40,16 @@
 # NOTES:
 #   - Profiling runs independently of model metrics (stored in results_dir).
 #   - Disabling individual sections reduces overhead during experimentation.
-#   - Memory sampling uses a background thread; very fast operations may fall
-#     back to tracemalloc-based snapshots.
+#   - Memory sampling uses a background thread. A phase shorter than one
+#     sampling interval falls back to a single direct RSS reading, flagged as
+#     source="rss_single_sample" in the output.
+#   - Every profile carries an `env` block (hostname, SLURM ids, process start
+#     time, available CPUs, load average, thread-cap env vars). Wall-clock
+#     timings are only comparable across runs that faced comparable load, so
+#     check `env` before comparing timings from different batches.
+#   - Timings are wall-clock (perf_counter). `training_cpu_time` mirrors
+#     `training_time` with CPU seconds; a large gap between the two means the
+#     block was blocked on I/O or contention rather than computing.
 #
 # =============================================================================
 
@@ -46,7 +60,8 @@ time:
 
 memory:
   enabled: true
-  interval: 0.1    # RSS sampling interval in seconds
+  interval: 0.1        # ceiling for the RSS sampling interval, in seconds
+  min_interval: 0.01   # interval sampling starts at, before backing off
 
 storage:
   enabled: true

@@ -5,6 +5,7 @@ import contextlib
 import io
 import logging
 import os
+import time
 import warnings
 
 # transformers logs a torch-version warning on import (pulled in transitively
@@ -190,6 +191,36 @@ class Synthesizer:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def warmup(self) -> float:
+        """
+        Import this synthesizer's backing library ahead of any timed work.
+
+        fit() calls the relevant _load_*() helper as its first action, so
+        without this the library import (sdv, synthcity, torch, pgmpy) is
+        charged to the synthesis_fit measurement. That import cost differs
+        substantially by backend — a torch-backed nflow pays far more than
+        native arf — so leaving it in place adds a per-method constant to
+        fit times that reads as a real difference in synthesis cost.
+
+        Idempotent: the _load_*() helpers cache their result, so calling this
+        makes fit()'s own call a no-op. Returns the import duration in seconds
+        so callers can record it separately.
+        """
+        start = time.perf_counter()
+        if self.library == "sdv":
+            _load_sdv()
+        elif self.library == "native":
+            _load_native()
+        else:
+            _load_synthcity()
+        elapsed = time.perf_counter() - start
+
+        logger.info(
+            f"[{self.name}] warmup: '{self.library}' imported in {elapsed:.3f}s "
+            f"(excluded from fit measurement)"
+        )
+        return elapsed
 
     def load_data(self, dataset_name: str, dataset_cfg: str = "config/datasets.yaml") -> None:
         """Load processed dataset and store it for fitting.

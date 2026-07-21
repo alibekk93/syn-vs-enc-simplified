@@ -1,7 +1,6 @@
 """Synthetic pipeline — synthesizes data and trains models on it."""
 
 import logging
-import time
 from src.utils import load_config, require_device
 from src.synthesizers import Synthesizer
 from src.models import Model, SUPPORTED_METRICS
@@ -95,6 +94,10 @@ def run(
             try:
                 synth = Synthesizer(synth_name, cfg=synthesizers_config, device=active_device)
 
+                # Force the backing library import before anything is timed,
+                # so synthesis_fit measures fitting rather than importing.
+                warmup_s = synth.warmup()
+
                 synth_profiler.start_memory_sampling(phase="synthesis")
 
                 with synth_profiler.time_block("synthesis_load"):
@@ -105,6 +108,7 @@ def run(
                     synth.save()
 
                 synth_profiler.stop_memory_sampling()
+                synth_profiler.log_env_extra("warmup_import_s", round(warmup_s, 4))
                 synth_profiler.save(f"{synth_name}__synthesis__{dataset_name}")
 
                 for factor in targets_factors:
@@ -158,12 +162,10 @@ def run(
 
                                 train_profiler.start_memory_sampling(phase="inference")
 
-                                start   = time.time()
-                                y_pred  = model.predict(model.X_test)
-                                y_proba = model.predict_proba(model.X_test)
-                                end     = time.time()
+                                with train_profiler.inference_block(len(model.X_test)):
+                                    y_pred  = model.predict(model.X_test)
+                                    y_proba = model.predict_proba(model.X_test)
 
-                                train_profiler.log_inference(end - start, len(model.X_test))
                                 train_profiler.stop_memory_sampling()
 
                                 metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)

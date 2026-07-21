@@ -33,6 +33,48 @@ def _log_section(title: str) -> None:
     logger.info(bar)
 
 
+def _warmup(device: str) -> dict:
+    """
+    Fit and compile a throwaway circuit so the first *measured* compile is warm.
+
+    Concrete ML defers loading its native compiler toolchain (MLIR/LLVM, the
+    Rust backend) until the first `.compile()` call, and defers a good deal of
+    Python import work until the first `.fit()`.  Both costs land inside
+    whichever timed block happens to run first, where they dominate: they are
+    paid once per process, are independent of circuit size, and balloon when
+    many array tasks cold-start against a shared filesystem simultaneously.
+    Left in place they make compile time uncorrelated with n_bits and circuit
+    complexity, which is to say meaningless.
+
+    Runs outside any profiler block. Returns its own timings so the startup
+    cost is still recorded — just not attributed to the model under test.
+    """
+    import time as _t
+
+    import numpy as np
+    from concrete.ml.sklearn import LogisticRegression as _WarmupLR
+
+    rng = np.random.default_rng(0)
+    X = rng.random((20, 2))
+    y = rng.integers(0, 2, 20)
+
+    model = _WarmupLR(n_bits=2)
+
+    t0 = _t.perf_counter()
+    model.fit(X, y)
+    fit_s = _t.perf_counter() - t0
+
+    t1 = _t.perf_counter()
+    model.compile(X, device=device)
+    compile_s = _t.perf_counter() - t1
+
+    logger.info(
+        f"[FHE warmup] toolchain loaded in fit={fit_s:.3f}s compile={compile_s:.3f}s "
+        f"(excluded from model measurements)"
+    )
+    return {"warmup_fit_s": round(fit_s, 4), "warmup_compile_s": round(compile_s, 4)}
+
+
 def _check_device(device: str) -> None:
     """Fails fast if `device='cuda'` is requested but unavailable, instead of
     failing deep inside `.compile()` (wasting a GPU job allocation)."""
@@ -104,6 +146,9 @@ def run(
 
     _log_section(f"FHE  |  mode: {fhe_mode}  |  device: {active_device}")
 
+    # Pay the one-off toolchain startup cost before anything is timed.
+    warmup_info = _warmup(active_device)
+
     results = {}
 
     for dataset_name in targets_datasets:
@@ -137,7 +182,7 @@ def run(
                 with profiler.time_block("training_fit"):
                     model.model.fit(model.X_train, model.y_train)
 
-                with profiler.time_block("training_compile"):
+                with profiler.time_block("training_compile") as comp:
                     model.model.compile(model.X_train, device=active_device)
 
                 model._save_model()
@@ -149,18 +194,17 @@ def run(
                 # ------------------------
                 profiler.start_memory_sampling(phase="inference")
 
-                import time as _time
-                start   = _time.time()
-                y_pred  = model.predict(model.X_test, fhe=fhe_mode)
-                y_proba = model.predict_proba(model.X_test, fhe=fhe_mode)
-                end     = _time.time()
+                with profiler.inference_block(len(model.X_test)) as inf:
+                    y_pred  = model.predict(model.X_test, fhe=fhe_mode)
+                    y_proba = model.predict_proba(model.X_test, fhe=fhe_mode)
 
-                profiler.log_inference(end - start, len(model.X_test))
                 profiler.stop_memory_sampling()
 
                 fhe_circuit = getattr(model.model, "fhe_circuit", None)
                 complexity  = getattr(fhe_circuit, "complexity", None)
                 profiler.log_fhe(complexity=complexity)
+                for key, value in warmup_info.items():
+                    profiler.log_env_extra(key, value)
 
                 metric_names = load_config(models_config).get("metrics") or list(SUPPORTED_METRICS)
                 metrics = bootstrap_utils.compute_metrics(model.y_test, y_pred, y_proba, metric_names)
@@ -196,7 +240,8 @@ def run(
 
                 logger.info(
                     f"[FHE profiling] n_bits={n_bits_for_model} | {dataset_name} | {model_name} "
-                    f"| inference={round(end - start, 4)}s | circuit_complexity={complexity}"
+                    f"| compile={round(comp.elapsed, 4)}s | inference={round(inf.elapsed, 4)}s "
+                    f"| circuit_complexity={complexity}"
                 )
 
                 # Save profiling with n_bits included
