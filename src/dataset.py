@@ -88,6 +88,33 @@ class Dataset:
         if all_cols and len(all_cols) == len(df.columns):
             df.columns = all_cols
 
+        # Keep only the declared features and target.
+        #
+        # Nothing downstream filters on `features`: Model/FHEModel build their
+        # design matrix as df.drop(columns=[target]), so *any* surplus column in
+        # the raw CSV silently becomes a predictor. Both pregnancy_outcome and
+        # gestational_diabetes ship a row-identifier column that is not declared
+        # here, is therefore never scaled or imputed, and — because the rows are
+        # ordered by class — predicts the target almost perfectly on its own
+        # (PatientID alone: test ROC-AUC 1.00). Dropping undeclared columns at
+        # load time makes `features` authoritative.
+        #
+        # Done before preprocess() so that columns derived later (e.g. one-hot
+        # expansions, which are not listed in `features`) are not dropped.
+        if all_cols:
+            missing = [c for c in all_cols if c not in df.columns]
+            if missing:
+                raise KeyError(
+                    f"[{self.name}] Columns declared in config but absent from {path}: "
+                    f"{missing}. Available: {list(df.columns)}"
+                )
+            extra = [c for c in df.columns if c not in all_cols]
+            if extra:
+                logger.info(
+                    f"[{self.name}] Dropping {len(extra)} undeclared column(s): {extra}"
+                )
+                df = df[all_cols]
+
         df.replace("?", np.nan, inplace=True)
         logger.info(f"[{self.name}] Loaded {len(df)} rows, {len(df.columns)} columns")
         return df
