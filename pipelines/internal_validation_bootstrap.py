@@ -10,7 +10,7 @@ import yaml
 import tempfile
 import os
 
-from src.utils import load_config
+from src.utils import atomic_path, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,12 @@ def run(
         internal_validation_bootstrap_raw_dir = Path(f"data/internal_validation_bootstrap/{seed}")
         internal_validation_bootstrap_raw_dir.mkdir(parents=True, exist_ok=True)
         internal_validation_bootstrap_raw_path = internal_validation_bootstrap_raw_dir / f"{dataset_name}.csv"
-        df_boot.to_csv(internal_validation_bootstrap_raw_path, index=False)
+        # Every (seed, n_bits) task re-creates this same seed-namespaced file, so
+        # the n_bits tasks sharing a seed write it concurrently. The content is
+        # seed-determined and therefore identical, but the write still has to be
+        # atomic or a concurrent reader can catch it mid-truncate.
+        with atomic_path(internal_validation_bootstrap_raw_path) as tmp:
+            df_boot.to_csv(tmp, index=False)
         logger.info(f"Saved internal validation bootstrap sample to {internal_validation_bootstrap_raw_path}")
 
         try:

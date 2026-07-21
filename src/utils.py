@@ -5,13 +5,145 @@ import copy
 import csv
 import json
 import logging
+import os
 import random
 import re
+import time
+import uuid
 import numpy as np
 import yaml
+from contextlib import contextmanager
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+class NegligibleProbabilityDriftFilter(logging.Filter):
+    """
+    Collapse pgmpy's float-epsilon "probabilities don't sum to 1" warnings.
+
+    Sampling a Bayesian network renormalises each CPD, and floating-point
+    rounding leaves the row sums off by ~1e-16. pgmpy warns every time, which
+    produced 510 identical lines in a single sweep and buried the handful of
+    real errors in the same logs.
+
+    Rather than silence the message outright, this drops it only when the
+    reported drift is within `tolerance` — genuine normalisation problems
+    (a drift big enough to distort sampling) still come through. The first
+    negligible occurrence is kept, annotated with a note that the rest are
+    being suppressed, so the log records that it happened.
+
+    Attach to the root handlers via `install_log_filters()`.
+    """
+
+    _PATTERN = re.compile(
+        r"Probability values don't exactly sum to 1.*?"
+        r"Differ by:\s*([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)"
+    )
+
+    def __init__(self, tolerance: float = 1e-9):
+        super().__init__()
+        self.tolerance = tolerance
+        self.suppressed = 0
+        self._announced = False
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        match = self._PATTERN.search(record.getMessage())
+        if not match:
+            return True
+        try:
+            drift = abs(float(match.group(1)))
+        except (TypeError, ValueError):
+            return True
+
+        # Large drift is a real problem — never hide it.
+        if drift > self.tolerance:
+            return True
+
+        if not self._announced:
+            self._announced = True
+            record.msg = (
+                f"{record.getMessage()} "
+                f"[further warnings within {self.tolerance:g} suppressed]"
+            )
+            record.args = ()
+            return True
+
+        self.suppressed += 1
+        return False
+
+
+def install_log_filters(tolerance: float = 1e-9) -> NegligibleProbabilityDriftFilter:
+    """
+    Attach the noise filters to the root logger's handlers.
+
+    Handler-level rather than logger-level: these records originate inside
+    third-party libraries under logger names we do not control, and a filter on
+    a Logger does not apply to records propagated up from its children. Every
+    record still has to pass the root handler to be emitted, so filtering there
+    catches them regardless of which library logged them.
+    """
+    drift_filter = NegligibleProbabilityDriftFilter(tolerance=tolerance)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(drift_filter)
+    return drift_filter
+
+
+@contextmanager
+def atomic_path(path):
+    """
+    Yield a temporary path to write to, then atomically move it into place.
+
+    Several output paths are shared by concurrently running jobs: every job
+    rewrites data/processed/{dataset}.csv during preprocessing, and the three
+    per-model jobs for a given (dataset, synthesizer) pair all regenerate the
+    same data/processed/{synth}_{scale}__{dataset}.csv. A plain to_csv() opens
+    the destination in truncate mode, so a concurrent reader can observe the
+    file as zero-length or half-written — surfacing as "No columns to parse
+    from file" or as NaNs where a final row was cut mid-line.
+
+    Writing to a unique temporary file and renaming closes that window:
+    os.replace is atomic, so a reader sees either the previous complete file
+    or the new complete one, never a partial state. The temp name carries the
+    pid and a random suffix so concurrent writers cannot collide on it either.
+
+    Note this guarantees integrity, not agreement: the synthesizers are not
+    seeded, so concurrent jobs write *different* valid datasets and the last
+    writer wins. See the note in config/synthesizers.yaml.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        yield tmp
+        _replace_with_retry(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _replace_with_retry(tmp: Path, path: Path, attempts: int = 10, delay: float = 0.05) -> None:
+    """
+    os.replace(tmp, path), retrying briefly on Windows.
+
+    On POSIX — which is where the experiments run — replacing a file that a
+    reader currently has open always succeeds: the reader keeps its handle on
+    the old inode and the rename is atomic. Windows instead refuses with
+    PermissionError while any handle is open, so a concurrent read during a
+    local run would otherwise crash the writer. Retrying covers that window;
+    on POSIX the first attempt always succeeds and this costs nothing.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def load_config(config_path: str) -> dict:

@@ -19,7 +19,7 @@ from typing import Optional, Union
 
 from sklearn.model_selection import train_test_split
 
-from src.utils import load_config
+from src.utils import atomic_path, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -358,24 +358,26 @@ class Synthesizer:
         if self.synthesizer is None:
             raise RuntimeError("Call fit() before save()")
 
-        self.synthesizers_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthesizers_dir / f"{self.name}__{self.dataset_name}.pkl"
 
-        if self.library == "sdv":
-            self.synthesizer._n_rows_original = self.n_rows_original
-            self.synthesizer.save(str(path))
-        elif self.library == "native":
-            import pickle
-            with open(path, "wb") as f:
-                pickle.dump(
-                    {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original}, f
+        # Same collision as the synthetic CSVs: this filename carries no model,
+        # so the concurrent per-model jobs all write it.
+        with atomic_path(path) as tmp:
+            if self.library == "sdv":
+                self.synthesizer._n_rows_original = self.n_rows_original
+                self.synthesizer.save(str(tmp))
+            elif self.library == "native":
+                import pickle
+                with open(tmp, "wb") as f:
+                    pickle.dump(
+                        {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original}, f
+                    )
+            else:
+                synthcity = _load_synthcity()
+                synthcity["save_to_file"](
+                    tmp,
+                    {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original},
                 )
-        else:
-            synthcity = _load_synthcity()
-            synthcity["save_to_file"](
-                path,
-                {"synthesizer": self.synthesizer, "n_rows_original": self.n_rows_original},
-            )
 
         logger.debug(f"[{self.name}] Synthesizer saved → {path}")
 
@@ -449,7 +451,10 @@ class Synthesizer:
                 f"[{self.name}] Synthetic data for '{self.dataset_name}' is empty after dropping NaN rows — "
                 "synthesizer produced no usable samples"
             )
-        self.synthetic_dir.mkdir(parents=True, exist_ok=True)
         path = self.synthetic_dir / f"{self.name}_{synth_scale}__{self.dataset_name}.csv"
-        df.to_csv(path, index=False)
+        # Written atomically: the per-model jobs for this (dataset, synthesizer)
+        # pair all regenerate this same filename concurrently, and a torn read
+        # here shows up downstream as an empty CSV or NaN-poisoned targets.
+        with atomic_path(path) as tmp:
+            df.to_csv(tmp, index=False)
         logger.debug(f"[{self.name}] Synthetic data saved → {path}")

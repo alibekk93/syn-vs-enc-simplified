@@ -27,7 +27,17 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from src.utils import load_config, aggregate_internal_validation_bootstrap, aggregate_metrics_csv
+from src.utils import (
+    load_config,
+    aggregate_internal_validation_bootstrap,
+    aggregate_metrics_csv,
+    install_log_filters,
+)
+
+# Collapse pgmpy's float-epsilon "probabilities don't sum to 1" warnings, which
+# otherwise repeat hundreds of times per run and bury real errors. Installed
+# after basicConfig so the filter lands on the handler it just created.
+install_log_filters()
 
 BOOTSTRAP_CFG = "config/bootstrap.yaml"
 

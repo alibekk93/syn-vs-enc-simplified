@@ -4,6 +4,8 @@
 import logging
 import pandas as pd
 import numpy as np
+
+from src.utils import atomic_path
 from pathlib import Path
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder
 
@@ -127,9 +129,14 @@ class Dataset:
         return df
 
     def save(self, df: pd.DataFrame) -> None:
-        """Save processed DataFrame to the resolved processed_path."""
-        self.processed_path.parent.mkdir(parents=True, exist_ok=True)
-        df.to_csv(self.processed_path, index=False)
+        """Save processed DataFrame to the resolved processed_path.
+
+        Written atomically: every concurrently running job rewrites this same
+        path during its preprocessing stage, and a reader must never see a
+        half-written file.
+        """
+        with atomic_path(self.processed_path) as tmp:
+            df.to_csv(tmp, index=False)
         logger.info(f"[{self.name}] Saved → {self.processed_path}")
 
     # ------------------------------------------------------------------

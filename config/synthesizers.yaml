@@ -46,6 +46,23 @@ split:
   random_state: 42
   stratify: true
 
+# NOTE ON REPRODUCIBILITY
+#   `random_state` above seeds the train/test split only — it is NOT passed to
+#   the synthesizers, and none of the methods below set a seed of their own. Two
+#   runs of the same method on the same data therefore produce different
+#   synthetic datasets.
+#
+#   This matters because jobs/submit_array_synth.sh submits one job per
+#   (dataset, synthesizer, model), so the three model jobs for a given
+#   (dataset, synthesizer) pair each generate their own synthetic data into the
+#   same filename. Writes are atomic (see src/utils.atomic_path), so nothing is
+#   corrupted — but the last writer wins, and the three models are not
+#   guaranteed to have been trained on the same synthetic dataset.
+#
+#   To make model comparisons exact, either seed each method here or generate
+#   the synthetic data once per (dataset, synthesizer) and have the model jobs
+#   read it read-only.
+
 output:
   synthetic_dir: data/processed
   synthesizers_dir: synthesizers

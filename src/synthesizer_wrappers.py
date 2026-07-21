@@ -168,7 +168,13 @@ class BayesianNetworkWrapper:
         from pgmpy.sampling import BayesianModelSampling
 
         sampler = BayesianModelSampling(self._model)
-        samples = sampler.forward_sample(size=count)[self._columns]
+        # show_progress=False suppresses the per-node tqdm bars, which are
+        # written to stderr and interleave with the log lines in the job's .err
+        # file. Older pgmpy releases don't accept the argument, so fall back.
+        try:
+            samples = sampler.forward_sample(size=count, show_progress=False)[self._columns]
+        except TypeError:
+            samples = sampler.forward_sample(size=count)[self._columns]
 
         result = samples.copy().astype(object)
 
