@@ -1856,23 +1856,25 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 # The polygon is a neutral slate, identical on every panel — the panel title names
 # the mode, so the polygon spends no colour and cannot collide with the group hues.
 
-# (column, short code, group) ordered by increasing display angle (18..342 deg,
-# 36 deg apart) so performance forms the top half with ROC-AUC at top centre and
-# resource forms the bottom half, with no axis on the horizontal group boundary.
+# (column, short code, group) ordered by increasing display angle so the 5
+# performance axes fill the top semicircle (ROC-AUC at top centre) and the 4
+# resource axes fill the bottom semicircle, with no axis on the horizontal
+# group boundary.
 _RADAR_AXES = [
     ("accuracy",            "Acc",     "perf"),      # 18
     ("f1",                  "F1",      "perf"),      # 54
     ("roc_auc",             "AUC",     "perf"),      # 90  (top centre)
     ("precision",           "Prec",    "perf"),      # 126
     ("recall",              "Rec",     "perf"),      # 162
-    ("model_size_mb",       "Size",    "resource"),  # 198
-    ("mem_train_peak",      "Tr mem",  "resource"),  # 234
-    ("mem_inf_peak",        "Inf mem", "resource"),  # 270 (bottom centre)
-    ("inf_time_per_sample", "Inf t",   "resource"),  # 306
-    ("train_time",          "Train t", "resource"),  # 342
+    ("mem_train_peak",      "Tr mem",  "resource"),  # 202.5
+    ("mem_inf_peak",        "Inf mem", "resource"),  # 247.5
+    ("inf_time_per_sample", "Inf t",   "resource"),  # 292.5
+    ("train_time",          "Train t", "resource"),  # 337.5
 ]
 
-_RADAR_ANGLES_DEG = [18, 54, 90, 126, 162, 198, 234, 270, 306, 342]
+# 5 performance axes evenly in the top half (36 deg apart), 4 resource axes
+# evenly in the bottom half (45 deg apart, symmetric about the 270 deg bottom).
+_RADAR_ANGLES_DEG = [18, 54, 90, 126, 162, 202.5, 247.5, 292.5, 337.5]
 
 # Short-code glossary shown in the legend/key cell (ASCII only, so the SVG needs
 # no special glyphs).
@@ -1880,8 +1882,7 @@ _RADAR_GLOSS_LINES = [
     "AUC=ROC-AUC, F1, Acc=Accuracy,",
     "Prec=Precision, Rec=Recall,",
     "Train t=train time, Inf t=inf/sample,",
-    "Inf mem=peak inf mem, Tr mem=peak train mem,",
-    "Size=model size",
+    "Inf mem=peak inf mem, Tr mem=peak train mem",
 ]
 
 _RADAR_DEFAULTS = {
@@ -1891,7 +1892,7 @@ _RADAR_DEFAULTS = {
     "baseline_color": "#8a8a8a",
     "grid_color": "#cfcfcf",
     "perf_band": (0.5, 1.0),
-    "perf_norm": "absolute",   # "absolute" (fixed band) | "minmax" (across shown modes)
+    "perf_norm": "minmax",     # "minmax" (across shown modes) | "absolute" (fixed band)
     "fhe_n_bits": 8,
     "primary_synth": ["arf", "bayesian_network", "ctgan", "gaussian_copula", "nflow"],
 }
@@ -2162,9 +2163,13 @@ def plot_radar_overview_multipanel(
     raw_keys = [k for k, _ in mode_subs]
     label_map, _color_map, _group_map = _build_mode_display(cfg, raw_keys)
     baseline_vec = norm_mean.get("standard")
+    # Real (standard) is the dashed reference on every panel, not its own panel.
+    panel_keys = [k for k in raw_keys if k != "standard"]
     angles = np.deg2rad(_RADAR_ANGLES_DEG)
 
     nrows, ncols = 2, 4
+    total_cells = nrows * ncols
+    n_panels = min(len(panel_keys), total_cells - 1)   # reserve one cell for the key
     fig, axes = plt.subplots(
         nrows, ncols,
         figsize=(_IEEE_FULL_WIDTH_IN, 4.5),
@@ -2174,24 +2179,21 @@ def plot_radar_overview_multipanel(
     flat = axes.flatten()
     label_fs = 8
 
-    n_panels = min(len(raw_keys), nrows * ncols - 1)   # reserve last cell for the key
     for idx in range(n_panels):
-        key = raw_keys[idx]
+        key = panel_keys[idx]
         ax = flat[idx]
-        base = None if key == "standard" else baseline_vec
         spread = norm_spread[key] if show_spread else None
-        _draw_radar_panel(ax, norm_mean[key], base, spread, rcfg, angles)
+        _draw_radar_panel(ax, norm_mean[key], baseline_vec, spread, rcfg, angles)
         ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=12)
         _add_panel_label(ax, idx, fontsize=label_fs, x=-0.02)
 
-    # hide any polar cells between the last panel and the key cell
-    for j in range(n_panels, nrows * ncols - 1):
-        flat[j].set_visible(False)
-
-    # key/legend cell (replace the polar axes in the last slot with a plain one)
-    flat[-1].remove()
-    leg = fig.add_subplot(nrows, ncols, nrows * ncols)
+    # key/legend cell immediately after the last panel; hide any cells past it
+    legend_idx = n_panels
+    flat[legend_idx].remove()
+    leg = fig.add_subplot(nrows, ncols, legend_idx + 1)
     _draw_radar_legend(leg, rcfg, show_spread, has_baseline=baseline_vec is not None)
+    for j in range(legend_idx + 1, total_cells):
+        flat[j].set_visible(False)
 
     fig.subplots_adjust(left=0.04, right=0.96, top=0.90, bottom=0.05,
                         wspace=0.55, hspace=0.55)
