@@ -2042,11 +2042,20 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
     for r in (0.25, 0.5, 0.75, 1.0):
         ax.plot(circ, np.full_like(circ, r), color=grid_c, lw=0.6, zorder=1)
 
-    # radial spokes + axis short-codes (spokes coloured by group; text stays ink)
-    for ang, (_col, short, group) in zip(angles, _RADAR_AXES):
+    # radial spokes coloured by group
+    for ang, (_col, _short, group) in zip(angles, _RADAR_AXES):
         spoke_c = perf_c if group == "perf" else res_c
         ax.plot([ang, ang], [0, 1], color=spoke_c, lw=0.7, alpha=0.45, zorder=1)
-        ax.text(ang, 1.14, short, ha="center", va="center",
+
+    # axis short-codes, anchored outward from the rim with angle-based alignment so
+    # a label never straddles the ring, crowds the panel title, or spills onto a
+    # neighbour. The top label sits a little farther out to clear the title.
+    for ang, (_col, short, _group) in zip(angles, _RADAR_AXES):
+        cx, sy = np.cos(ang), np.sin(ang)
+        ha = "left" if cx > 0.25 else "right" if cx < -0.25 else "center"
+        va = "bottom" if sy > 0.25 else "top" if sy < -0.25 else "center"
+        r = 1.20 if sy > 0.85 else 1.15
+        ax.text(ang, r, short, ha=ha, va=va,
                 fontsize=6, color="#52514e", zorder=6)
 
     theta = np.concatenate([angles, angles[:1]])
@@ -2144,8 +2153,8 @@ def plot_radar_overview_multipanel(
         ax = flat[idx]
         spread = norm_spread[key] if show_spread else None
         _draw_radar_panel(ax, norm_mean[key], baseline_vec, spread, rcfg, angles)
-        ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=12)
-        _add_panel_label(ax, idx, fontsize=label_fs, x=-0.02)
+        ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=20)
+        _add_panel_label(ax, idx, fontsize=label_fs, x=-0.05)
 
     for j in range(n_panels, total_cells):
         flat[j].set_visible(False)
@@ -2159,8 +2168,8 @@ def plot_radar_overview_multipanel(
         fig.legend(handles=[real_handle], loc="lower center",
                    bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=8)
 
-    fig.subplots_adjust(left=0.05, right=0.95, top=0.90, bottom=0.08,
-                        wspace=0.45, hspace=0.55)
+    fig.subplots_adjust(left=0.06, right=0.94, top=0.88, bottom=0.09,
+                        wspace=0.55, hspace=0.72)
 
     fmt = fig_cfg["format"]
     save_path = Path(save_dir) / f"radar_overview_multipanel.{fmt}"
