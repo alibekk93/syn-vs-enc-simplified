@@ -1462,23 +1462,402 @@ def plot_violinplot_multipanel(
 
 
 # ===========================================================
+# ROC CURVES (FROM RAW PREDICTIONS)
+# ===========================================================
+#
+# Unlike every figure above, these read the raw per-sample scores in
+# results/predictions/*.json (y_true, y_proba) rather than pre-computed metric
+# JSONs, so they can draw true ROC curves. The 95% true-positive-rate band is a
+# vertical-averaging bootstrap that reuses the project's resample scheme
+# (np.random.default_rng(seed).integers(0, N, N), see src/bootstrap_utils.py):
+# it draws the same resamples that produced the reported ROC-AUC CIs, so the band
+# is the curve-level analog of those intervals.
+
+PREDICTIONS_DIR = Path("results/predictions")
+
+_ROC_FPR_GRID = np.linspace(0.0, 1.0, 201)
+
+
+def load_predictions(predictions_dir=PREDICTIONS_DIR, split="test"):
+    """
+    Load raw per-sample predictions into preds[dataset][model][raw_mode] = (y_true, y_proba).
+
+    raw_mode is the filename's leading "__" segment kept verbatim ("standard",
+    "arf_100", "fhe_8", ...), so synthesis scales and FHE bit-widths stay distinct.
+    Files without probabilities (y_proba is null) are skipped — ROC needs scores.
+    """
+    preds: dict = {}
+    for path in Path(predictions_dir).glob(f"*__{split}__predictions.json"):
+        parts = path.stem.split("__")
+        if len(parts) < 4 or parts[3] != split:
+            continue
+        raw_mode, model, dataset = parts[0], parts[1], parts[2]
+
+        with open(path) as f:
+            data = json.load(f)
+        y_proba = data.get("y_proba")
+        y_true = data.get("y_true")
+        if y_proba is None or y_true is None:
+            continue
+
+        (preds.setdefault(dataset, {})
+              .setdefault(model, {})[raw_mode]) = (
+            np.asarray(y_true), np.asarray(y_proba, dtype=float)
+        )
+    return preds
+
+
+def _bootstrap_settings(bootstrap_cfg_path="config/bootstrap.yaml"):
+    """Return (n, seed) from bootstrap.yaml, defaulting to the project convention."""
+    try:
+        cfg = load_config(bootstrap_cfg_path)
+        return int(cfg.get("n", 1000)), int(cfg.get("seed", 42))
+    except Exception:
+        return 1000, 42
+
+
+def _roc_from_pred(y_true, y_proba):
+    """(fpr, tpr, auc) for one prediction set. Returns None if AUC is undefined."""
+    from sklearn.metrics import roc_curve, roc_auc_score
+
+    y_true = np.asarray(y_true)
+    if np.unique(y_true).size < 2:
+        return None
+    fpr, tpr, _ = roc_curve(y_true, y_proba)
+    auc = roc_auc_score(y_true, y_proba)
+    return fpr, tpr, auc
+
+
+def _bootstrap_tpr_band(y_true, y_proba, fpr_grid=_ROC_FPR_GRID, n=1000, seed=42,
+                        lo_pct=2.5, hi_pct=97.5):
+    """
+    Vertical-averaging bootstrap band: (tpr_lo, tpr_hi) on fpr_grid, or None.
+
+    Reproduces the reported ROC-AUC resamples (same rng scheme + seed). Each
+    resample's ROC is interpolated onto the shared FPR grid; resamples that lose a
+    class (ROC undefined) are dropped. The band is the lo/hi percentile of TPR at
+    each FPR grid point.
+    """
+    from sklearn.metrics import roc_curve
+
+    y_true = np.asarray(y_true)
+    y_proba = np.asarray(y_proba, dtype=float)
+    n_samples = len(y_true)
+    rng = np.random.default_rng(seed)
+
+    tprs = []
+    for _ in range(n):
+        idx = rng.integers(0, n_samples, size=n_samples)
+        yt = y_true[idx]
+        if np.unique(yt).size < 2:
+            continue
+        fpr_b, tpr_b, _ = roc_curve(yt, y_proba[idx])
+        interp = np.interp(fpr_grid, fpr_b, tpr_b)
+        interp[0] = 0.0
+        tprs.append(interp)
+
+    if len(tprs) < 2:
+        return None
+    tprs = np.vstack(tprs)
+    return np.percentile(tprs, lo_pct, axis=0), np.percentile(tprs, hi_pct, axis=0)
+
+
+def _fmt_auc(auc):
+    """Compact AUC string, e.g. 0.938 -> '.94', 1.0 -> '1.00'."""
+    s = f"{auc:.2f}"
+    return s[1:] if s.startswith("0") else s
+
+
+def _draw_roc_panel(ax, curves, fpr_grid, band_labels, annotate_labels,
+                    n_boot, seed, auc_fontsize=6):
+    """
+    Render one ROC panel.
+
+    curves : ordered list of dicts {label, short, color, linestyle, y_true, y_proba}.
+    band_labels     : labels that get a shaded 95% TPR bootstrap band.
+    annotate_labels : labels whose AUC is printed in the lower-right block.
+    """
+    # Chance diagonal first so curves sit on top.
+    ax.plot([0, 1], [0, 1], color="#9a9a9a", linestyle=(0, (1, 1)),
+            linewidth=0.8, zorder=1)
+
+    annotations = []  # (short, auc, color) in curve order
+    for c in curves:
+        roc = _roc_from_pred(c["y_true"], c["y_proba"])
+        if roc is None:
+            continue
+        fpr, tpr, auc = roc
+
+        if c["label"] in band_labels:
+            band = _bootstrap_tpr_band(c["y_true"], c["y_proba"], fpr_grid,
+                                       n=n_boot, seed=seed)
+            if band is not None:
+                lo, hi = band
+                ax.fill_between(fpr_grid, lo, hi, color=c["color"],
+                                alpha=0.15, linewidth=0, zorder=2)
+
+        ax.plot(fpr, tpr, color=c["color"], linestyle=c["linestyle"],
+                linewidth=1.1, zorder=3, solid_capstyle="round")
+
+        if c["label"] in annotate_labels:
+            annotations.append((c["short"], auc, c["color"]))
+
+    # AUC block in the lower-right whitespace (below the diagonal), stacked so the
+    # first curve sits at the top.
+    n_ann = len(annotations)
+    for i, (short, auc, color) in enumerate(annotations):
+        y = 0.05 + (n_ann - 1 - i) * 0.105
+        ax.text(0.96, y, f"{short} {_fmt_auc(auc)}",
+                transform=ax.transAxes, ha="right", va="bottom",
+                fontsize=auc_fontsize, color=color, zorder=4)
+
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_box_aspect(1)
+    ax.set_xticks([0, 0.5, 1])
+    ax.set_yticks([0, 0.5, 1])
+
+
+def _roc_grid_figure(preds, cfg, *, panel_curves, band_labels, annotate_labels,
+                     legend_handles, save_name, save_dir=FIGURES_DIR, legend_ncol=None):
+    """
+    Shared 3-model x N-dataset ROC multipanel scaffold.
+
+    panel_curves(preds, dataset, model, cfg) -> ordered list of curve dicts for a panel.
+    legend_handles : list of Line2D for the shared bottom legend.
+    legend_ncol    : columns in the shared legend (defaults to a single row, capped
+                     at 6 so a long precision legend wraps instead of overflowing).
+    Mirrors the layout/margins of plot_synth_scale_lines_multipanel.
+    """
+    import math
+    _apply_publication_style(cfg)
+
+    # Canonical dataset order (known first, any extras appended), models alphabetical.
+    datasets = [d for d in _DATASET_LABELS if d in preds]
+    datasets += sorted(d for d in preds if d not in datasets)
+    models = sorted({m for d in datasets for m in preds.get(d, {})})
+    if not datasets or not models:
+        return
+
+    n_boot, seed = _bootstrap_settings()
+    n_row, n_col = len(models), len(datasets)
+    tick_fs, label_fs = 7, 8
+
+    fig, axes = plt.subplots(
+        n_row, n_col,
+        figsize=(_IEEE_FULL_WIDTH_IN, 5.2),
+        squeeze=False,
+    )
+
+    for r, model in enumerate(models):
+        for c, dataset in enumerate(datasets):
+            ax = axes[r, c]
+            curves = panel_curves(preds, dataset, model, cfg)
+            if curves:
+                _draw_roc_panel(ax, curves, _ROC_FPR_GRID, band_labels,
+                                annotate_labels, n_boot, seed)
+
+            ax.tick_params(labelsize=tick_fs, length=3, pad=2,
+                           labelbottom=(r == n_row - 1), labelleft=(c == 0))
+            sns.despine(ax=ax)
+
+            if r == 0:
+                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+            if r == n_row - 1:
+                ax.set_xlabel("False Positive Rate", fontsize=label_fs, labelpad=3)
+            if c == 0:
+                ax.set_ylabel("True Positive Rate", fontsize=label_fs, labelpad=3)
+                # Model row label — far left, rotated (the (a)/(b) tag takes the corner).
+                ax.text(-0.42, 0.5, _abbrev_model(model),
+                        transform=ax.transAxes, rotation=90,
+                        fontsize=label_fs, fontweight="bold",
+                        va="center", ha="center")
+
+            _add_panel_label(ax, r * n_col + c, fontsize=label_fs)
+
+    if legend_ncol is None:
+        legend_ncol = min(len(legend_handles), 6)
+    legend_rows = math.ceil(len(legend_handles) / legend_ncol)
+    bottom_frac = 0.06 + 0.035 * legend_rows
+
+    fig.legend(
+        handles=legend_handles,
+        fontsize=7,
+        ncol=legend_ncol,
+        loc="lower center",
+        bbox_to_anchor=(0.5, 0.0),
+        frameon=False,
+        handletextpad=0.4,
+        columnspacing=1.2,
+    )
+    plt.tight_layout(rect=[0, bottom_frac, 1, 1])
+
+    fmt = cfg["figures"]["format"]
+    save_path = Path(save_dir) / f"{save_name}.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close(fig)
+
+
+def plot_roc_primary_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
+                                viz_cfg_path="config/visualization.yaml"):
+    """
+    Primary-RQ ROC figure: Real vs best synthetic generator (ARF, scale 100) vs
+    FHE 8-bit, one panel per (model, dataset), each curve with a 95% TPR band.
+    Saved as: roc_curves_primary_multipanel.{fmt}
+    """
+    from matplotlib.lines import Line2D
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    real_color = _mode_color(cfg, "standard")
+    arf_color  = _mode_color(cfg, "arf")
+    fhe_color  = _mode_color(cfg, "fhe_8")
+
+    # (raw_mode, label, short, color, linestyle). Distinct line styles keep the
+    # trio separable in greyscale on top of the colorblind-safe hues.
+    spec = [
+        ("standard", "Real",      "R", real_color, "-"),
+        ("arf_100",  "ARF",       "A", arf_color,  (0, (5, 1.5))),
+        ("fhe_8",    "FHE 8-bit", "F", fhe_color,  (0, (3, 1, 1, 1))),
+    ]
+
+    def panel_curves(preds, dataset, model, cfg):
+        avail = preds.get(dataset, {}).get(model, {})
+        curves = []
+        for raw, label, short, color, ls in spec:
+            if raw in avail:
+                yt, yp = avail[raw]
+                curves.append({"label": label, "short": short, "color": color,
+                               "linestyle": ls, "y_true": yt, "y_proba": yp})
+        return curves
+
+    labels = {label for _, label, *_ in spec}
+    legend_handles = [
+        Line2D([0], [0], color=real_color, linestyle="-",
+               linewidth=1.3, label="Real"),
+        Line2D([0], [0], color=arf_color, linestyle=(0, (5, 1.5)),
+               linewidth=1.3, label="ARF (best generator)"),
+        Line2D([0], [0], color=fhe_color, linestyle=(0, (3, 1, 1, 1)),
+               linewidth=1.3, label="FHE 8-bit"),
+        Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
+               linewidth=1.0, label="Chance"),
+    ]
+
+    _roc_grid_figure(
+        preds, cfg,
+        panel_curves=panel_curves,
+        band_labels=labels,
+        annotate_labels=labels,
+        legend_handles=legend_handles,
+        save_name="roc_curves_primary_multipanel",
+        save_dir=save_dir,
+    )
+
+
+def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
+                                      viz_cfg_path="config/visualization.yaml"):
+    """
+    RQ2 ROC figure: Real baseline plus FHE at every bit-width (2..12, shaded
+    light->dark by precision), one panel per (model, dataset). Only the Real
+    reference carries a 95% TPR band — an FHE curve entering that band is
+    statistically indistinguishable from the baseline, while seven overlapping
+    bands would be unreadable.
+    Saved as: roc_curves_fhe_precision_multipanel.{fmt}
+    """
+    from matplotlib.lines import Line2D
+
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    real_color = _mode_color(cfg, "standard")
+
+    # FHE bit-widths present anywhere, ascending, shaded via the existing FHE ramp.
+    fhe_bits = sorted({
+        int(raw.split("_")[1])
+        for d in preds.values() for m in d.values() for raw in m
+        if raw.startswith("fhe_")
+    })
+    fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
+    base_color = fhe_gcfg.get("base_color", "#8c564b")
+    l_range = fhe_gcfg.get("lightness_range", [0.72, 0.32])
+    bit_colors = dict(zip(fhe_bits, _lightness_ramp(base_color, len(fhe_bits), l_range)))
+
+    def panel_curves(preds, dataset, model, cfg):
+        avail = preds.get(dataset, {}).get(model, {})
+        curves = []
+        if "standard" in avail:
+            yt, yp = avail["standard"]
+            curves.append({"label": "Real", "short": "R", "color": real_color,
+                           "linestyle": "-", "y_true": yt, "y_proba": yp})
+        for nb in fhe_bits:
+            raw = f"fhe_{nb}"
+            if raw in avail:
+                yt, yp = avail[raw]
+                curves.append({"label": f"FHE {nb}-bit", "short": f"{nb}b",
+                               "color": bit_colors[nb], "linestyle": "-",
+                               "y_true": yt, "y_proba": yp})
+        return curves
+
+    # Annotate only the anchors (Real + lowest/highest precision) to avoid a
+    # seven-line AUC block in a narrow panel.
+    annotate = {"Real"}
+    if fhe_bits:
+        annotate |= {f"FHE {fhe_bits[0]}-bit", f"FHE {fhe_bits[-1]}-bit"}
+
+    legend_handles = [
+        Line2D([0], [0], color=real_color, linestyle="-", linewidth=1.3, label="Real"),
+    ]
+    legend_handles += [
+        Line2D([0], [0], color=bit_colors[nb], linestyle="-", linewidth=1.3,
+               label=f"FHE {nb}-bit")
+        for nb in fhe_bits
+    ]
+    legend_handles.append(
+        Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
+               linewidth=1.0, label="Chance")
+    )
+
+    _roc_grid_figure(
+        preds, cfg,
+        panel_curves=panel_curves,
+        band_labels={"Real"},
+        annotate_labels=annotate,
+        legend_handles=legend_handles,
+        save_name="roc_curves_fhe_precision_multipanel",
+        save_dir=save_dir,
+        legend_ncol=4,
+    )
+
+
+# ===========================================================
 # MAIN ENTRYPOINT
 # ===========================================================
 
 def _render_multipanel_figures(df_all, cfg):
     """
-    Render the IEEE multipanel figures from an unfiltered dataframe.
+    Render the IEEE multipanel figures.
 
     FHE rows carry no synth_scale, so the two FHE panels are unaffected by scale
     filtering; the synth-scale panel needs every scale (100/150/300); and the violin
     panel applies its own canonical scale-100 filter internally. Passing the full
     df_all to all of them therefore keeps behaviour identical while avoiding a
     separate pre-filtered frame.
+
+    The ROC-curve multipanels are also multipanel figures but draw from the raw
+    per-sample scores in results/predictions rather than the bootstrap dataframe, so
+    they load their own data instead of taking df_all.
     """
     plot_fhe_training_breakdown_multipanel(df_all, cfg=cfg)
     plot_fhe_complexity_cost_multipanel(df_all, cfg=cfg)
     plot_synth_scale_lines_multipanel(df_all, cfg=cfg)
     plot_violinplot_multipanel(df_all, metric="roc_auc", cfg=cfg)
+
+    preds = load_predictions()
+    if preds:
+        plot_roc_primary_multipanel(preds, cfg=cfg)
+        plot_roc_fhe_precision_multipanel(preds, cfg=cfg)
 
 
 def generate_all_figures():
