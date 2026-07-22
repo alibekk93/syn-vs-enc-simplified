@@ -6,7 +6,7 @@ Usage:
     python main.py run-experiment --config config/main.yaml --n-bits 4
     python main.py run-single-internal-validation-bootstrap --config config/main.yaml --seed 42
     python main.py list-n-bits
-    python main.py create-visuals
+    python main.py create-all-visuals
     python main.py create-multipanel-visuals
     python main.py aggregate-metrics-csv
     python main.py paired-bootstrap-tests --metric roc_auc --modes standard 'fhe_*'
@@ -172,7 +172,7 @@ def verify_gpu(venv: str, device: str = "cuda"):
         raise SystemExit(1)
 
 
-def create_visuals():
+def create_all_visuals():
     logger.info("=== Creating visualizations ===")
     from src.visualization import generate_all_figures
     generate_all_figures()
@@ -192,9 +192,9 @@ def aggregate_internal_validation_bootstrap_results(results_dir: str, output_pat
     logger.info("=== Aggregation complete ===")
 
 
-def aggregate_metrics_to_csv(metrics_dir: str, output_path: str):
+def aggregate_metrics_to_csv(metrics_dir: str, output_path: str, profiles_dir: str):
     logger.info("=== Aggregating metrics to CSV ===")
-    aggregate_metrics_csv(metrics_dir=metrics_dir, output_path=output_path)
+    aggregate_metrics_csv(metrics_dir=metrics_dir, output_path=output_path, profiles_dir=profiles_dir)
     logger.info("=== Aggregation complete ===")
 
 
@@ -326,9 +326,9 @@ if __name__ == "__main__":
              "CUDA-enabled PyTorch install."
     )
 
-    # ---- create-visuals ----
+    # ---- create-all-visuals ----
     subparsers.add_parser(
-        "create-visuals",
+        "create-all-visuals",
         help="Generate visualizations only"
     )
 
@@ -379,8 +379,8 @@ if __name__ == "__main__":
     # ---- aggregate-metrics-csv ----
     metrics_csv_parser = subparsers.add_parser(
         "aggregate-metrics-csv",
-        help="Aggregate results/metrics/*.json into one CSV (mean + 95%% CI per metric, "
-             "one row per mode/dataset/model)"
+        help="Aggregate results/metrics/*.json into one CSV (mean + 95%% CI per metric "
+             "plus resource-profiling columns, one row per mode/dataset/model)"
     )
     metrics_csv_parser.add_argument(
         "--metrics-dir",
@@ -391,6 +391,12 @@ if __name__ == "__main__":
         "--output",
         default="results/metrics_aggregated.csv",
         help="Path to write the aggregated CSV file (default: results/metrics_aggregated.csv)"
+    )
+    metrics_csv_parser.add_argument(
+        "--profiles-dir",
+        default="results/resource_profiles",
+        help="Directory containing per-run resource-profile JSON files, joined per "
+             "mode/model/dataset (default: results/resource_profiles)"
     )
 
     # ---- paired-bootstrap-tests ----
@@ -557,8 +563,8 @@ if __name__ == "__main__":
     elif args.command == "run-single-internal-validation-bootstrap":
         run_single_internal_validation_bootstrap(args.config, args.seed, args.n_bits, args.device)
 
-    elif args.command == "create-visuals":
-        create_visuals()
+    elif args.command == "create-all-visuals":
+        create_all_visuals()
 
     elif args.command == "create-multipanel-visuals":
         create_multipanel_visuals()
@@ -570,7 +576,7 @@ if __name__ == "__main__":
         aggregate_internal_validation_bootstrap_results(args.results_dir, args.output)
 
     elif args.command == "aggregate-metrics-csv":
-        aggregate_metrics_to_csv(args.metrics_dir, args.output)
+        aggregate_metrics_to_csv(args.metrics_dir, args.output, args.profiles_dir)
 
     elif args.command == "paired-bootstrap-tests":
         run_paired_bootstrap_tests(args.metrics_dir, args.output, args.metric,

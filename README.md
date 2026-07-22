@@ -21,7 +21,7 @@ mirroring how internal validation bootstrap parallelizes across seeds via `run-s
 Run after experiments are complete:
 
 ```
-python main.py create-visuals
+python main.py create-all-visuals
 ```
 
 This reads from `results/metrics/metrics/` and `results/resource_profiles/` and writes SVG figures to `results/figures/`. Only synth mode results at synth_scale=100 are included in the plots.
@@ -32,7 +32,7 @@ To use internal validation bootstrap data instead (see below), call `load_intern
 
 Two bootstrap approaches are implemented in `src/visualization.py`:
 
-**Simple bootstrap** (`load_simple_bootstrap`, default) — the model is fit once on the full training set; the test set is resampled with replacement many times and evaluated on each resample. Each metrics JSON in `results/metrics/metrics/` stores the resulting distribution as a list of per-iteration values. Resource profiles are single scalar measurements. This is what `create-visuals` uses.
+**Simple bootstrap** (`load_simple_bootstrap`, default) — the model is fit once on the full training set; the test set is resampled with replacement many times and evaluated on each resample. Each metrics JSON in `results/metrics/metrics/` stores the resulting distribution as a list of per-iteration values. Resource profiles are single scalar measurements. This is what `create-all-visuals` uses.
 
 **Why resource metrics have no bootstrap distribution** — Bootstrap resamples prediction arrays, not inputs, so inference runs only once. Producing a resource distribution would require re-running inference for every resample (N× the inference cost), which is cost-prohibitive for resource-intensive models such as FHE. Prediction metrics are cheap to recompute from existing predictions; resource metrics are not.
 

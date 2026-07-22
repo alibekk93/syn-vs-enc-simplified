@@ -379,10 +379,60 @@ def aggregate_internal_validation_bootstrap(results_dir: str = "results/internal
 
 _METRICS_CSV_METRIC_NAMES = ["accuracy", "f1", "roc_auc", "precision", "recall"]
 
+# Resource-profiling columns appended to each metrics row, in output order.
+# Mirrors the field set that src/visualization.py extracts from a profile, so
+# the CSV and the figures draw the same numbers from the same JSON.
+_METRICS_CSV_RESOURCE_COLUMNS = [
+    "train_time",
+    "synth_fit_time",
+    "fhe_fit_time",
+    "fhe_compile_time",
+    "inf_time_total",
+    "inf_time_per_sample",
+    "mem_train_avg",
+    "mem_train_peak",
+    "mem_inf_avg",
+    "mem_inf_peak",
+    "model_size_mb",
+    "data_size_mb",
+    "circuit_complexity",
+]
+
+
+def _extract_resource_columns(profile: dict) -> dict:
+    """Flatten a resource-profile JSON (as written by ResourceProfiler.save) into
+    the scalar `_METRICS_CSV_RESOURCE_COLUMNS`. Missing sub-keys yield None."""
+    training_time  = profile.get("training_time", {}) or {}
+    inference_time = profile.get("inference_time", {}) or {}
+    memory         = profile.get("memory", {}) or {}
+    storage        = profile.get("storage", {}) or {}
+    fhe            = profile.get("fhe", {}) or {}
+    mem_train = memory.get("training", {}) or {}
+    mem_inf   = memory.get("inference", {}) or {}
+
+    return {
+        # train_time sums every timed training block (fit, compile, ...), matching
+        # the aggregation in src/visualization.py.
+        "train_time":          round(sum(training_time.values()), 4) if training_time else None,
+        "synth_fit_time":      training_time.get("synthesis_fit"),
+        "fhe_fit_time":        training_time.get("training_fit"),
+        "fhe_compile_time":    training_time.get("training_compile"),
+        "inf_time_total":      inference_time.get("total"),
+        "inf_time_per_sample": inference_time.get("per_sample"),
+        "mem_train_avg":       mem_train.get("average_mb"),
+        "mem_train_peak":      mem_train.get("peak_mb"),
+        "mem_inf_avg":         mem_inf.get("average_mb"),
+        "mem_inf_peak":        mem_inf.get("peak_mb"),
+        "model_size_mb":       storage.get("model_size_mb"),
+        "data_size_mb":        storage.get("data_size_mb"),
+        "circuit_complexity":  fhe.get("circuit_complexity"),
+    }
+
 
 def aggregate_metrics_csv(
     metrics_dir: str = "results/metrics",
     output_path: str = "results/metrics_aggregated.csv",
+    profiles_dir: str = "results/resource_profiles",
 ):
     """Aggregate every `{mode}__{model}__{dataset}__test__metrics.json` file in
     metrics_dir into a single CSV with one row per (mode, dataset, model).
@@ -395,11 +445,18 @@ def aggregate_metrics_csv(
     Each metric gets three columns — `{metric}_mean`, `{metric}_ci_low`,
     `{metric}_ci_high` — computed from that file's n=1000 bootstrap distribution:
     the mean, and the 95% CI via the 2.5th/97.5th percentiles.
+
+    The matching resource profile in `profiles_dir` (`{mode}__{model}__{dataset}.json`,
+    as written by ResourceProfiler.save) contributes the scalar
+    `_METRICS_CSV_RESOURCE_COLUMNS` on the same row. Rows with no profile file get
+    None for every resource column.
     """
     fieldnames = ["mode", "dataset", "model"]
     for metric in _METRICS_CSV_METRIC_NAMES:
         fieldnames += [f"{metric}_mean", f"{metric}_ci_low", f"{metric}_ci_high"]
+    fieldnames += _METRICS_CSV_RESOURCE_COLUMNS
 
+    profiles_path = Path(profiles_dir)
     rows = []
     for path in sorted(Path(metrics_dir).glob("*.json")):
         parts = path.stem.split("__")
@@ -425,6 +482,14 @@ def aggregate_metrics_csv(
             row[f"{metric}_mean"] = round(float(arr.mean()), 4)
             row[f"{metric}_ci_low"] = round(float(ci_low), 4)
             row[f"{metric}_ci_high"] = round(float(ci_high), 4)
+
+        profile_path = profiles_path / f"{mode}__{model}__{dataset}.json"
+        if profile_path.exists():
+            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            row.update(_extract_resource_columns(profile))
+        else:
+            logger.warning(f"No resource profile for {mode}/{model}/{dataset}: {profile_path.name}")
+            row.update({col: None for col in _METRICS_CSV_RESOURCE_COLUMNS})
 
         rows.append(row)
 
