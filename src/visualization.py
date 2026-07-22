@@ -1872,18 +1872,10 @@ _RADAR_AXES = [
     ("train_time",          "Train t", "resource"),  # 337.5
 ]
 
-# 5 performance axes evenly in the top half (36 deg apart), 4 resource axes
-# evenly in the bottom half (45 deg apart, symmetric about the 270 deg bottom).
-_RADAR_ANGLES_DEG = [18, 54, 90, 126, 162, 202.5, 247.5, 292.5, 337.5]
-
-# Short-code glossary shown in the legend/key cell (ASCII only, so the SVG needs
-# no special glyphs).
-_RADAR_GLOSS_LINES = [
-    "AUC=ROC-AUC, F1, Acc=Accuracy,",
-    "Prec=Precision, Rec=Recall,",
-    "Train t=train time, Inf t=inf/sample,",
-    "Inf mem=peak inf mem, Tr mem=peak train mem",
-]
+# All 9 axes evenly spaced (40 deg apart). ROC-AUC sits at the top (90 deg); the
+# 5 performance axes run 10..170 deg (top) and the 4 resource axes 210..330 deg
+# (bottom), so the two groups stay contiguous while the spacing stays uniform.
+_RADAR_ANGLES_DEG = [10, 50, 90, 130, 170, 210, 250, 290, 330]
 
 _RADAR_DEFAULTS = {
     "perf_color": "#0072b2",
@@ -2026,17 +2018,24 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
     ax.spines["polar"].set_visible(False)
     ax.set_facecolor("none")
 
-    # group wedge washes: top half = performance, bottom half = resource.
-    # Drawn as explicit half-disk wedges (centre -> rim -> arc -> rim -> centre)
-    # so they render identically across matplotlib versions.
-    top = np.linspace(0, np.pi, 120)
-    bot = np.linspace(np.pi, 2 * np.pi, 120)
-    ax.fill(np.concatenate([[0.0], top, [np.pi]]),
-            np.concatenate([[0.0], np.ones_like(top), [0.0]]),
-            color=perf_c, alpha=0.06, linewidth=0, zorder=0)
-    ax.fill(np.concatenate([[np.pi], bot, [2 * np.pi]]),
-            np.concatenate([[0.0], np.ones_like(bot), [0.0]]),
-            color=res_c, alpha=0.06, linewidth=0, zorder=0)
+    # group wedge washes spanning each group's actual angular extent (padded by
+    # half a step on each side), so the wash follows the group even though the
+    # axes are spaced evenly around the whole circle. Drawn as explicit wedges
+    # (centre -> rim -> arc -> rim -> centre) for version-stable rendering.
+    half_step = np.pi / len(angles)   # = (2*pi / n) / 2
+
+    def _wash(a0, a1, color):
+        t = np.linspace(a0, a1, 160)
+        ax.fill(np.concatenate([[a0], t, [a1]]),
+                np.concatenate([[0.0], np.ones_like(t), [0.0]]),
+                color=color, alpha=0.06, linewidth=0, zorder=0)
+
+    perf_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "perf"]
+    res_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "resource"]
+    if perf_ang:
+        _wash(perf_ang[0] - half_step, perf_ang[-1] + half_step, perf_c)
+    if res_ang:
+        _wash(res_ang[0] - half_step, res_ang[-1] + half_step, res_c)
 
     # concentric hairline gridlines
     circ = np.linspace(0, 2 * np.pi, 240)
@@ -2060,10 +2059,10 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
                 ax.plot([ang, ang], [l, h], color=poly_c, lw=1.0,
                         alpha=0.28, zorder=3, solid_capstyle="round")
 
-    # Real baseline reference (dashed, no fill) on non-Real panels
+    # Real baseline reference (dashed, no fill), drawn in the standard-mode colour
     if baseline is not None:
         b = np.concatenate([baseline, baseline[:1]])
-        ax.plot(theta, b, color=base_c, lw=1.3, linestyle=(0, (4, 2)),
+        ax.plot(theta, b, color=base_c, lw=1.5, linestyle=(0, (4, 2)),
                 zorder=3, solid_capstyle="round")
 
     # mode polygon (neutral slate; fill only if every vertex is finite)
@@ -2074,47 +2073,6 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
             solid_capstyle="round", solid_joinstyle="round")
     ax.plot(angles, values, "o", color=poly_c, markersize=3.5,
             markeredgecolor="white", markeredgewidth=1.0, zorder=6)
-
-
-def _draw_radar_legend(ax, rcfg, show_spread, has_baseline):
-    """Render the key cell: group swatches, mark legend, code glossary, and note."""
-    from matplotlib.patches import Patch
-    from matplotlib.lines import Line2D
-
-    ax.axis("off")
-
-    handles = [
-        Patch(facecolor=rcfg["perf_color"], edgecolor="none", label="Performance (top)"),
-        Patch(facecolor=rcfg["resource_color"], edgecolor="none", label="Resource cost (bottom)"),
-        Line2D([0], [0], color=rcfg["poly_color"], lw=2.0, marker="o", markersize=3.5,
-               markeredgecolor="white", markeredgewidth=1.0, label="Mode (mean)"),
-    ]
-    if has_baseline:
-        handles.append(Line2D([0], [0], color=rcfg["baseline_color"], lw=1.3,
-                              linestyle=(0, (4, 2)), label="Real baseline"))
-    if show_spread:
-        handles.append(Line2D([0], [0], color=rcfg["poly_color"], lw=1.0, alpha=0.4,
-                              label="IQR across 15 cells"))
-
-    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 1.04),
-              fontsize=6.2, frameon=False, handlelength=1.6, handletextpad=0.5,
-              labelspacing=0.5, borderaxespad=0.0)
-
-    if str(rcfg.get("perf_norm", "absolute")).lower() == "minmax":
-        perf_line = "Perf: min-max across modes."
-    else:
-        blo, bhi = rcfg.get("perf_band", (0.5, 1.0))
-        perf_line = f"Perf: absolute {blo:g}-{bhi:g}."
-
-    note_lines = list(_RADAR_GLOSS_LINES) + [
-        "",
-        "Outward = better on every axis.",
-        perf_line,
-        "Resource: log, min-max across modes.",
-        "Point = mean of 15 cells (5 ds x 3 models).",
-    ]
-    ax.text(0.5, 0.40, "\n".join(note_lines), transform=ax.transAxes,
-            ha="center", va="top", fontsize=5.6, color="#52514e", linespacing=1.35)
 
 
 def plot_radar_overview_multipanel(
@@ -2163,22 +2121,24 @@ def plot_radar_overview_multipanel(
     raw_keys = [k for k, _ in mode_subs]
     label_map, _color_map, _group_map = _build_mode_display(cfg, raw_keys)
     baseline_vec = norm_mean.get("standard")
-    # Real (standard) is the dashed reference on every panel, not its own panel.
+    # Real (standard) is the dashed reference on every panel, not its own panel,
+    # drawn in the standard-mode colour (green) for continuity with the other figures.
+    rcfg["baseline_color"] = _mode_color(cfg, "standard")
     panel_keys = [k for k in raw_keys if k != "standard"]
     angles = np.deg2rad(_RADAR_ANGLES_DEG)
 
-    nrows, ncols = 2, 4
+    nrows, ncols = 2, 3
     total_cells = nrows * ncols
-    n_panels = min(len(panel_keys), total_cells - 1)   # reserve one cell for the key
     fig, axes = plt.subplots(
         nrows, ncols,
-        figsize=(_IEEE_FULL_WIDTH_IN, 4.5),
+        figsize=(_IEEE_FULL_WIDTH_IN, 5.0),
         subplot_kw=dict(polar=True),
         squeeze=False,
     )
     flat = axes.flatten()
     label_fs = 8
 
+    n_panels = min(len(panel_keys), total_cells)
     for idx in range(n_panels):
         key = panel_keys[idx]
         ax = flat[idx]
@@ -2187,16 +2147,20 @@ def plot_radar_overview_multipanel(
         ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=12)
         _add_panel_label(ax, idx, fontsize=label_fs, x=-0.02)
 
-    # key/legend cell immediately after the last panel; hide any cells past it
-    legend_idx = n_panels
-    flat[legend_idx].remove()
-    leg = fig.add_subplot(nrows, ncols, legend_idx + 1)
-    _draw_radar_legend(leg, rcfg, show_spread, has_baseline=baseline_vec is not None)
-    for j in range(legend_idx + 1, total_cells):
+    for j in range(n_panels, total_cells):
         flat[j].set_visible(False)
 
-    fig.subplots_adjust(left=0.04, right=0.96, top=0.90, bottom=0.05,
-                        wspace=0.55, hspace=0.55)
+    # single legend entry: the Real (standard) dashed baseline. Everything else is
+    # explained in the manuscript caption (added separately).
+    if baseline_vec is not None:
+        from matplotlib.lines import Line2D
+        real_handle = Line2D([0], [0], color=rcfg["baseline_color"], lw=1.5,
+                             linestyle=(0, (4, 2)), label=label_map.get("standard", "Real"))
+        fig.legend(handles=[real_handle], loc="lower center",
+                   bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=8)
+
+    fig.subplots_adjust(left=0.05, right=0.95, top=0.90, bottom=0.08,
+                        wspace=0.45, hspace=0.55)
 
     fmt = fig_cfg["format"]
     save_path = Path(save_dir) / f"radar_overview_multipanel.{fmt}"
