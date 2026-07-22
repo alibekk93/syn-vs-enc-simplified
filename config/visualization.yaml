@@ -125,3 +125,23 @@ metrics:
 # can span orders of magnitude across modes). All other metrics use a linear axis.
 log_scale_metrics:
   - inf_time_per_sample
+
+# Radar overview figure — one polar panel per mode, aggregated over all
+# datasets x models. Performance axes fill the TOP half (absolute [0,1] band);
+# resource-cost axes fill the BOTTOM half (log + min-max across the shown modes,
+# inverted) so "outward = better" on every axis. The two group hues are drawn
+# from the Okabe-Ito palette and are validated colorblind-safe (blue vs
+# vermilion: CVD dE >= 21, both >= 3:1 contrast on white).
+radar:
+  perf_color: "#0072b2"        # performance group (Okabe-Ito blue)
+  resource_color: "#d55e00"    # resource group (Okabe-Ito vermilion)
+  poly_color: "#2b2b2b"        # per-mode polygon — neutral, identical every panel
+  baseline_color: "#8a8a8a"    # Real reference polygon (dashed, non-Real panels)
+  grid_color: "#cfcfcf"        # concentric hairline gridlines
+  # Performance-axis normalization:
+  #   absolute -> map raw metric through perf_band (true magnitude, stable)
+  #   minmax   -> per-axis min-max across the shown modes (max mode contrast)
+  perf_norm: absolute
+  perf_band: [0.5, 1.0]        # absolute radial band for performance axes
+  fhe_n_bits: 8                # which FHE bit-width gets a panel
+  primary_synth: [arf, bayesian_network, ctgan, gaussian_copula, nflow]

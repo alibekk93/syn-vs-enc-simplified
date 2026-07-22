@@ -1835,6 +1835,374 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 # MAIN ENTRYPOINT
 # ===========================================================
 
+# ===========================================================
+# RADAR OVERVIEW (PER-MODE UTILITY-VS-COST SIGNATURES)
+# ===========================================================
+#
+# One polar panel per mode (Real / synthesizers at scale=100 / FHE at a chosen
+# bit-width), each aggregating over all datasets x models. The 10 axes split into
+# two contiguous half-circles so the grouping the reader must make is done for
+# them by geometry + colour:
+#   - Performance (top half)   : native [0,1] metrics, mapped to an absolute band
+#                                [0.5, 1.0] -> [centre, rim]. Outward = higher.
+#   - Resource cost (bottom)   : log10 + min-max across the shown modes, INVERTED,
+#                                so the cheapest shown mode reaches the rim.
+# Outward therefore means "better" on every axis, and the polygon's area is a
+# fair visual summary. Exact values live in the manuscript tables; the radar's
+# job is the shape/signature comparison across modes.
+#
+# Colour does exactly one job here: group identity (performance vs resource),
+# carried redundantly by a wedge wash + coloured spokes (never by the axis text).
+# The polygon is a neutral slate, identical on every panel — the panel title names
+# the mode, so the polygon spends no colour and cannot collide with the group hues.
+
+# (column, short code, group) ordered by increasing display angle (18..342 deg,
+# 36 deg apart) so performance forms the top half with ROC-AUC at top centre and
+# resource forms the bottom half, with no axis on the horizontal group boundary.
+_RADAR_AXES = [
+    ("accuracy",            "Acc",     "perf"),      # 18
+    ("f1",                  "F1",      "perf"),      # 54
+    ("roc_auc",             "AUC",     "perf"),      # 90  (top centre)
+    ("precision",           "Prec",    "perf"),      # 126
+    ("recall",              "Rec",     "perf"),      # 162
+    ("model_size_mb",       "Size",    "resource"),  # 198
+    ("mem_train_peak",      "Tr mem",  "resource"),  # 234
+    ("mem_inf_peak",        "Inf mem", "resource"),  # 270 (bottom centre)
+    ("inf_time_per_sample", "Inf t",   "resource"),  # 306
+    ("train_time",          "Train t", "resource"),  # 342
+]
+
+_RADAR_ANGLES_DEG = [18, 54, 90, 126, 162, 198, 234, 270, 306, 342]
+
+# Short-code glossary shown in the legend/key cell (ASCII only, so the SVG needs
+# no special glyphs).
+_RADAR_GLOSS_LINES = [
+    "AUC=ROC-AUC, F1, Acc=Accuracy,",
+    "Prec=Precision, Rec=Recall,",
+    "Train t=train time, Inf t=inf/sample,",
+    "Inf mem=peak inf mem, Tr mem=peak train mem,",
+    "Size=model size",
+]
+
+_RADAR_DEFAULTS = {
+    "perf_color": "#0072b2",
+    "resource_color": "#d55e00",
+    "poly_color": "#2b2b2b",
+    "baseline_color": "#8a8a8a",
+    "grid_color": "#cfcfcf",
+    "perf_band": (0.5, 1.0),
+    "perf_norm": "absolute",   # "absolute" (fixed band) | "minmax" (across shown modes)
+    "fhe_n_bits": 8,
+    "primary_synth": ["arf", "bayesian_network", "ctgan", "gaussian_copula", "nflow"],
+}
+
+
+def _radar_cfg(cfg):
+    """Radar settings with hardcoded fallbacks, overlaid by any `radar:` config."""
+    d = dict(_RADAR_DEFAULTS)
+    d.update(cfg.get("radar", {}) or {})
+    return d
+
+
+def _radar_select_modes(df, rcfg):
+    """
+    Ordered (raw_key, sub_df) for the primary modes present in ``df``:
+    Real -> synthesizers at synth_scale=100 (alphabetical) -> FHE at the chosen
+    bit-width. Mirrors the canonical _sort_raw_keys ordering. Modes with no rows
+    are skipped so the figure degrades gracefully on a partial results set.
+    """
+    out = []
+    real = df[df["mode"] == "standard"]
+    if not real.empty:
+        out.append(("standard", real))
+
+    for m in sorted(rcfg["primary_synth"]):
+        sub = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
+        if not sub.empty:
+            out.append((m, sub))
+
+    nb = rcfg["fhe_n_bits"]
+    fhe = df[(df["mode"] == "fhe") & (df["n_bits"] == nb)]
+    if not fhe.empty:
+        out.append((f"fhe_{int(nb)}", fhe))
+
+    return out
+
+
+def _radar_aggregate(mode_subs):
+    """
+    For each mode, aggregate to one value per axis.
+
+    Each (dataset, model) pair is one "cell"; within a cell, metric columns are
+    averaged over bootstrap iterations and resource columns are constant. The mode
+    value is the mean over cells (equal weight per cell). Per-cell arrays are kept
+    for the IQR spread band.
+    """
+    cols = [c for c, _, _ in _RADAR_AXES]
+    means, cells = {}, {}
+    for key, sub in mode_subs:
+        cell_means = sub.groupby(["dataset", "model"])[cols].mean()
+        cells[key] = {c: cell_means[c].to_numpy(dtype=float) for c in cols}
+        means[key] = {c: float(cell_means[c].mean()) for c in cols}
+    return means, cells
+
+
+def _radar_axis_transforms(means, rcfg):
+    """
+    Build one normaliser per axis (col -> callable mapping a value/array to [0,1]).
+
+    Resource axes: log10 then min-max across the shown modes, inverted (lower cost
+    -> larger radius). Performance axes follow ``perf_norm``:
+      - "absolute" (default): mapped through the fixed ``perf_band`` (e.g. 0.5->1.0),
+        so radius reads as true metric magnitude and is stable regardless of which
+        modes are shown.
+      - "minmax": per-axis min-max across the shown modes (higher -> larger radius),
+        which maximises the visible contrast between modes at the cost of absolute
+        meaning (best shown mode always reaches the rim).
+    The across-mode min/max come from the mode means, so per-cell values (spread
+    band) reuse the same scale and may clip at the ends, which is fine.
+    """
+    band_lo, band_hi = rcfg["perf_band"]
+    perf_norm = str(rcfg.get("perf_norm", "absolute")).lower()
+
+    def perf_absolute(v):
+        v = np.asarray(v, dtype=float)
+        return np.clip((v - band_lo) / (band_hi - band_lo), 0.0, 1.0)
+
+    def _minmax_across_modes(col, invert, use_log):
+        """A min-max normaliser over the shown modes' means for one column."""
+        vals = np.array([means[k][col] for k in means], dtype=float)
+        vals = vals[np.isfinite(vals) & ((vals > 0) if use_log else True)]
+        if vals.size < 2:
+            return lambda v: np.full(np.shape(v), 0.5)
+        ref = np.log10(vals) if use_log else vals
+        lo, hi = float(ref.min()), float(ref.max())
+
+        def f(v, lo=lo, hi=hi, invert=invert, use_log=use_log):
+            v = np.asarray(v, dtype=float)
+            if use_log:
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    x = np.log10(np.where(v > 0, v, np.nan))
+            else:
+                x = v
+            if hi <= lo:
+                return np.full(np.shape(v), 0.5)
+            norm = (hi - x) / (hi - lo) if invert else (x - lo) / (hi - lo)
+            return np.clip(norm, 0.0, 1.0)
+
+        return f
+
+    transforms = {}
+    for col, _short, group in _RADAR_AXES:
+        if group == "perf":
+            if perf_norm == "minmax":
+                transforms[col] = _minmax_across_modes(col, invert=False, use_log=False)
+            else:
+                transforms[col] = perf_absolute
+        else:
+            transforms[col] = _minmax_across_modes(col, invert=True, use_log=True)
+    return transforms
+
+
+def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
+    """
+    Draw one mode's radar into a polar axes.
+
+    values   : normalised [0,1] per axis (len == len(angles))
+    baseline : normalised Real reference per axis, or None (Real's own panel)
+    spread   : (lo_list, hi_list) normalised IQR per axis, or None
+    """
+    perf_c = rcfg["perf_color"]
+    res_c = rcfg["resource_color"]
+    poly_c = rcfg["poly_color"]
+    base_c = rcfg["baseline_color"]
+    grid_c = rcfg["grid_color"]
+
+    ax.grid(False)
+    ax.set_ylim(0, 1)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.spines["polar"].set_visible(False)
+    ax.set_facecolor("none")
+
+    # group wedge washes: top half = performance, bottom half = resource.
+    # Drawn as explicit half-disk wedges (centre -> rim -> arc -> rim -> centre)
+    # so they render identically across matplotlib versions.
+    top = np.linspace(0, np.pi, 120)
+    bot = np.linspace(np.pi, 2 * np.pi, 120)
+    ax.fill(np.concatenate([[0.0], top, [np.pi]]),
+            np.concatenate([[0.0], np.ones_like(top), [0.0]]),
+            color=perf_c, alpha=0.06, linewidth=0, zorder=0)
+    ax.fill(np.concatenate([[np.pi], bot, [2 * np.pi]]),
+            np.concatenate([[0.0], np.ones_like(bot), [0.0]]),
+            color=res_c, alpha=0.06, linewidth=0, zorder=0)
+
+    # concentric hairline gridlines
+    circ = np.linspace(0, 2 * np.pi, 240)
+    for r in (0.25, 0.5, 0.75, 1.0):
+        ax.plot(circ, np.full_like(circ, r), color=grid_c, lw=0.6, zorder=1)
+
+    # radial spokes + axis short-codes (spokes coloured by group; text stays ink)
+    for ang, (_col, short, group) in zip(angles, _RADAR_AXES):
+        spoke_c = perf_c if group == "perf" else res_c
+        ax.plot([ang, ang], [0, 1], color=spoke_c, lw=0.7, alpha=0.45, zorder=1)
+        ax.text(ang, 1.14, short, ha="center", va="center",
+                fontsize=6, color="#52514e", zorder=6)
+
+    theta = np.concatenate([angles, angles[:1]])
+
+    # IQR spread whiskers (radial p25->p75 at each vertex)
+    if spread is not None:
+        lo, hi = spread
+        for ang, l, h in zip(angles, lo, hi):
+            if np.isfinite(l) and np.isfinite(h) and h > l:
+                ax.plot([ang, ang], [l, h], color=poly_c, lw=1.0,
+                        alpha=0.28, zorder=3, solid_capstyle="round")
+
+    # Real baseline reference (dashed, no fill) on non-Real panels
+    if baseline is not None:
+        b = np.concatenate([baseline, baseline[:1]])
+        ax.plot(theta, b, color=base_c, lw=1.3, linestyle=(0, (4, 2)),
+                zorder=3, solid_capstyle="round")
+
+    # mode polygon (neutral slate; fill only if every vertex is finite)
+    v = np.concatenate([values, values[:1]])
+    if np.all(np.isfinite(values)):
+        ax.fill(theta, v, color=poly_c, alpha=0.14, linewidth=0, zorder=4)
+    ax.plot(theta, v, color=poly_c, lw=2.0, zorder=5,
+            solid_capstyle="round", solid_joinstyle="round")
+    ax.plot(angles, values, "o", color=poly_c, markersize=3.5,
+            markeredgecolor="white", markeredgewidth=1.0, zorder=6)
+
+
+def _draw_radar_legend(ax, rcfg, show_spread, has_baseline):
+    """Render the key cell: group swatches, mark legend, code glossary, and note."""
+    from matplotlib.patches import Patch
+    from matplotlib.lines import Line2D
+
+    ax.axis("off")
+
+    handles = [
+        Patch(facecolor=rcfg["perf_color"], edgecolor="none", label="Performance (top)"),
+        Patch(facecolor=rcfg["resource_color"], edgecolor="none", label="Resource cost (bottom)"),
+        Line2D([0], [0], color=rcfg["poly_color"], lw=2.0, marker="o", markersize=3.5,
+               markeredgecolor="white", markeredgewidth=1.0, label="Mode (mean)"),
+    ]
+    if has_baseline:
+        handles.append(Line2D([0], [0], color=rcfg["baseline_color"], lw=1.3,
+                              linestyle=(0, (4, 2)), label="Real baseline"))
+    if show_spread:
+        handles.append(Line2D([0], [0], color=rcfg["poly_color"], lw=1.0, alpha=0.4,
+                              label="IQR across 15 cells"))
+
+    ax.legend(handles=handles, loc="upper center", bbox_to_anchor=(0.5, 1.04),
+              fontsize=6.2, frameon=False, handlelength=1.6, handletextpad=0.5,
+              labelspacing=0.5, borderaxespad=0.0)
+
+    if str(rcfg.get("perf_norm", "absolute")).lower() == "minmax":
+        perf_line = "Perf: min-max across modes."
+    else:
+        blo, bhi = rcfg.get("perf_band", (0.5, 1.0))
+        perf_line = f"Perf: absolute {blo:g}-{bhi:g}."
+
+    note_lines = list(_RADAR_GLOSS_LINES) + [
+        "",
+        "Outward = better on every axis.",
+        perf_line,
+        "Resource: log, min-max across modes.",
+        "Point = mean of 15 cells (5 ds x 3 models).",
+    ]
+    ax.text(0.5, 0.40, "\n".join(note_lines), transform=ax.transAxes,
+            ha="center", va="top", fontsize=5.6, color="#52514e", linespacing=1.35)
+
+
+def plot_radar_overview_multipanel(
+    df, save_dir=FIGURES_DIR, cfg=None,
+    viz_cfg_path="config/visualization.yaml", show_spread=True,
+):
+    """
+    IEEE full-width multipanel radar — one panel per mode, aggregated over all
+    datasets x models, with a performance half and an inverted resource-cost half.
+
+    Saved as: radar_overview_multipanel.{fmt}
+    """
+    if cfg is None:
+        cfg = _load_viz_config(viz_cfg_path)
+
+    rcfg = _radar_cfg(cfg)
+    fig_cfg = cfg["figures"]
+    _apply_publication_style(cfg)
+
+    cols = [c for c, _, _ in _RADAR_AXES]
+    if any(c not in df.columns for c in cols) or "dataset" not in df.columns:
+        return
+
+    mode_subs = _radar_select_modes(df, rcfg)
+    if len(mode_subs) < 2:
+        return
+
+    means, cells = _radar_aggregate(mode_subs)
+    transforms = _radar_axis_transforms(means, rcfg)
+
+    norm_mean, norm_spread = {}, {}
+    for key in means:
+        norm_mean[key] = [float(transforms[c](means[key][c])) for c in cols]
+        lo, hi = [], []
+        for c in cols:
+            arr = np.asarray(transforms[c](cells[key][c]), dtype=float)
+            arr = arr[np.isfinite(arr)]
+            if arr.size:
+                lo.append(float(np.percentile(arr, 25)))
+                hi.append(float(np.percentile(arr, 75)))
+            else:
+                lo.append(np.nan)
+                hi.append(np.nan)
+        norm_spread[key] = (lo, hi)
+
+    raw_keys = [k for k, _ in mode_subs]
+    label_map, _color_map, _group_map = _build_mode_display(cfg, raw_keys)
+    baseline_vec = norm_mean.get("standard")
+    angles = np.deg2rad(_RADAR_ANGLES_DEG)
+
+    nrows, ncols = 2, 4
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(_IEEE_FULL_WIDTH_IN, 4.5),
+        subplot_kw=dict(polar=True),
+        squeeze=False,
+    )
+    flat = axes.flatten()
+    label_fs = 8
+
+    n_panels = min(len(raw_keys), nrows * ncols - 1)   # reserve last cell for the key
+    for idx in range(n_panels):
+        key = raw_keys[idx]
+        ax = flat[idx]
+        base = None if key == "standard" else baseline_vec
+        spread = norm_spread[key] if show_spread else None
+        _draw_radar_panel(ax, norm_mean[key], base, spread, rcfg, angles)
+        ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=12)
+        _add_panel_label(ax, idx, fontsize=label_fs, x=-0.02)
+
+    # hide any polar cells between the last panel and the key cell
+    for j in range(n_panels, nrows * ncols - 1):
+        flat[j].set_visible(False)
+
+    # key/legend cell (replace the polar axes in the last slot with a plain one)
+    flat[-1].remove()
+    leg = fig.add_subplot(nrows, ncols, nrows * ncols)
+    _draw_radar_legend(leg, rcfg, show_spread, has_baseline=baseline_vec is not None)
+
+    fig.subplots_adjust(left=0.04, right=0.96, top=0.90, bottom=0.05,
+                        wspace=0.55, hspace=0.55)
+
+    fmt = fig_cfg["format"]
+    save_path = Path(save_dir) / f"radar_overview_multipanel.{fmt}"
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(save_path, format=fmt, bbox_inches="tight")
+    plt.close(fig)
+
+
 def _render_multipanel_figures(df_all, cfg):
     """
     Render the IEEE multipanel figures.
@@ -1853,6 +2221,7 @@ def _render_multipanel_figures(df_all, cfg):
     plot_fhe_complexity_cost_multipanel(df_all, cfg=cfg)
     plot_synth_scale_lines_multipanel(df_all, cfg=cfg)
     plot_violinplot_multipanel(df_all, metric="roc_auc", cfg=cfg)
+    plot_radar_overview_multipanel(df_all, cfg=cfg)
 
     preds = load_predictions()
     if preds:
