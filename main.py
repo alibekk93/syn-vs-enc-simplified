@@ -201,7 +201,7 @@ def aggregate_metrics_to_csv(metrics_dir: str, output_path: str, profiles_dir: s
 def run_paired_bootstrap_tests(metrics_dir: str, output, metric: str, modes,
                                datasets, models, alpha: float, fmt: str,
                                comparison: str, reference, tie_rule: str,
-                               margin: float, test_type: str):
+                               margin: float, test_type: str, side: str):
     logger.info(f"=== Paired bootstrap significance tests ({metric}) ===")
     # --reference only makes sense in the reference design, so supplying it is
     # taken as the intent, saving the user from passing both flags.
@@ -212,7 +212,7 @@ def run_paired_bootstrap_tests(metrics_dir: str, output, metric: str, modes,
         metrics_dir=metrics_dir, output=output, metric=metric,
         modes=modes, datasets=datasets, models=models, alpha=alpha, fmt=fmt,
         comparison=comparison, reference=reference, tie_rule=tie_rule,
-        margin=margin, test_type=test_type,
+        margin=margin, test_type=test_type, side=side,
     )
     logger.info("=== Significance testing complete ===")
 
@@ -493,6 +493,18 @@ if __name__ == "__main__":
              "reported raw in p_diff / p_noninf / p_equiv."
     )
     stats_parser.add_argument(
+        "--side",
+        default="two-sided",
+        choices=["two-sided", "greater", "less"],
+        help="Sidedness of the difference test (--test-type difference). "
+             "'two-sided' (default) tests H0: no difference. 'greater' tests "
+             "H1: mode_a > mode_b (e.g. more synthesis scale or more bits is "
+             "better); 'less' tests H1: mode_a < mode_b (e.g. a method is worse "
+             "than Real). p_one_sided is always reported; it becomes the primary "
+             "Holm-corrected p only for a one-sided difference run. Ignored by "
+             "the noninferiority/equivalence tests, which are already one-sided."
+    )
+    stats_parser.add_argument(
         "--alpha",
         type=float,
         default=0.05,
@@ -583,7 +595,7 @@ if __name__ == "__main__":
                                    args.modes, args.datasets, args.models,
                                    args.alpha, args.format, args.comparison,
                                    args.reference, args.tie_rule, args.margin,
-                                   args.test_type)
+                                   args.test_type, args.side)
 
     elif args.command == "generate-seeds":
         generate_seeds(args.seed, args.length)

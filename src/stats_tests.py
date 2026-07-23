@@ -75,6 +75,11 @@ _MODE_FAMILY_ORDER = {
 TIE_RULES = ["split", "conservative", "exclude"]
 TEST_TYPES = ["difference", "noninferiority", "equivalence"]
 
+# Sidedness of the difference test. "two-sided" is the original behaviour and
+# stays the default. "greater" (H1: a > b) and "less" (H1: a < b) request the
+# one-sided ASL in a prespecified direction; see paired_bootstrap_test.
+SIDES = ["two-sided", "greater", "less"]
+
 # Default non-inferiority / equivalence margin on the metric scale. 0.05 ROC-AUC
 # is a deliberately lenient screening margin: it is wide enough that the strong
 # modes (arf ~0.011 below baseline, FHE at high bit widths) can be declared
@@ -84,10 +89,10 @@ DEFAULT_MARGIN = 0.05
 _OUTPUT_FIELDS = [
     "dataset", "model", "metric", "comparison",
     "mode_a", "mode_b",
-    "n_valid", "n_ties", "tie_rule",
+    "n_valid", "n_ties", "tie_rule", "side",
     "mean_a", "mean_b", "mean_diff",
     "ci_low", "ci_high",
-    "margin", "p_diff", "p_noninf", "p_equiv",
+    "margin", "p_diff", "p_one_sided", "p_noninf", "p_equiv",
     "test_type", "p_value", "p_holm", "family_size", "significant_holm",
     "better",
 ]
@@ -221,20 +226,47 @@ def build_pairs(present: list[str], comparison: str,
 
 def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
                           tie_rule: str = "split",
-                          margin: float = DEFAULT_MARGIN) -> dict:
+                          margin: float = DEFAULT_MARGIN,
+                          side: str = "two-sided") -> dict:
     """
     Paired bootstrap tests on index-aligned replicate arrays.
 
-    Computes three p-values from the same difference distribution
+    Computes several p-values from the same difference distribution
     d_i = a_i - b_i, i = 1..B:
 
-      p_diff    two-sided test of H0: no difference.
-      p_noninf  one-sided non-inferiority test of H0: a is worse than b by at
-                least `margin`. A small p_noninf licenses "a is non-inferior
-                to b within margin".
-      p_equiv   TOST equivalence, max of the two one-sided tests against
-                -margin and +margin. A small p_equiv licenses "a and b are
-                equivalent within margin".
+      p_diff       two-sided test of H0: no difference. Always reported.
+      p_one_sided  one-sided test in the prespecified `side` direction; None
+                   when side == "two-sided". See below.
+      p_noninf     one-sided non-inferiority test of H0: a is worse than b by at
+                   least `margin`. A small p_noninf licenses "a is non-inferior
+                   to b within margin".
+      p_equiv      TOST equivalence, max of the two one-sided tests against
+                   -margin and +margin. A small p_equiv licenses "a and b are
+                   equivalent within margin".
+
+    ONE-SIDED DIFFERENCE (side != "two-sided")
+    ------------------------------------------
+    When `side` is "greater" (H1: a > b) or "less" (H1: a < b), p_one_sided is
+    the mass of the difference distribution CONTRADICTING H1 (d < 0 for
+    "greater", d > 0 for "less"), with ties handled per `tie_rule`, plus the
+    (r+1)/(B+1) correction:
+
+        p_one_sided = (wrong_side + tie_term + 1) / (b_eff + 1)
+
+    It equals p_diff / 2 in the hypothesized direction and is the dual of a
+    one-sided 90% percentile CI. p_diff (two-sided) is reported too, so a table
+    can carry both without a rerun.
+
+    Direction is defined by mode_a vs mode_b, and the reference design pins the
+    reference as mode_a, so the correct side depends on which mode is the
+    reference:
+      * vs-real contrasts (--reference standard, so mode_a = standard) use
+        side="greater": H1 is real > method, i.e. the method is significantly
+        WORSE than real. A significant result means "not a valid replacement".
+      * synthesis-scale contrasts (--reference <gen>_100, mode_a = the 100% base)
+        and adjacent bit-width dose-response contrasts (mode_a = the lower scale
+        / fewer bits) use side="less": H1 is mode_b > mode_a, i.e. the larger
+        scale or higher bit width is better.
 
     THE TWO-SIDED STATISTIC
     -----------------------
@@ -282,14 +314,16 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
     which is just above 1 and clips to 1.0.
     """
     out = {
-        "n_valid": 0, "n_ties": None, "tie_rule": tie_rule,
+        "n_valid": 0, "n_ties": None, "tie_rule": tie_rule, "side": side,
         "mean_a": None, "mean_b": None, "mean_diff": None,
         "ci_low": None, "ci_high": None,
         "margin": margin,
-        "p_diff": None, "p_noninf": None, "p_equiv": None,
+        "p_diff": None, "p_one_sided": None, "p_noninf": None, "p_equiv": None,
     }
     if tie_rule not in TIE_RULES:
         raise ValueError(f"Unknown tie_rule {tie_rule!r}; expected one of {TIE_RULES}")
+    if side not in SIDES:
+        raise ValueError(f"Unknown side {side!r}; expected one of {SIDES}")
 
     # Joint mask. Dropping NaNs independently per array would shift the two
     # series relative to each other and destroy the index alignment the whole
@@ -318,6 +352,21 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
     # All replicates tied under "exclude" leaves nothing to test on.
     p_diff = 1.0 if b_eff <= 0 else min(1.0, 2.0 * (r + 1) / (b_eff + 1))
 
+    # One-sided ASL in the prespecified direction. The mass CONTRADICTING H1
+    # sits on the wrong side of zero: d < 0 (n_neg) for "greater", d > 0 (n_pos)
+    # for "less". Ties follow the same tie_rule as the two-sided statistic, so
+    # switching sidedness never changes how quantization ties are treated.
+    p_one_sided = None
+    if side != "two-sided":
+        wrong = n_neg if side == "greater" else n_pos
+        if tie_rule == "conservative":
+            r_os, b_os = wrong + n_tie, n_valid
+        elif tie_rule == "split":
+            r_os, b_os = wrong + n_tie / 2.0, n_valid
+        else:  # "exclude"
+            r_os, b_os = wrong, n_valid - n_tie
+        p_one_sided = 1.0 if b_os <= 0 else min(1.0, (r_os + 1) / (b_os + 1))
+
     ci_low, ci_high = np.percentile(d, [2.5, 97.5])
     out.update(
         n_ties=n_tie,
@@ -328,6 +377,7 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
         ci_high=round(float(ci_high), 4),
         # 6dp: the 2/1001 floor needs the resolution to stay distinguishable.
         p_diff=round(float(p_diff), 6),
+        p_one_sided=None if p_one_sided is None else round(float(p_one_sided), 6),
     )
 
     if margin and margin > 0:
@@ -386,6 +436,7 @@ def run_pairwise_tests(
     tie_rule: str = "split",
     margin: float = DEFAULT_MARGIN,
     test_type: str = "difference",
+    side: str = "two-sided",
 ) -> list[dict]:
     """
     Mode comparisons within each (dataset, classifier) cell.
@@ -400,8 +451,16 @@ def run_pairwise_tests(
     """
     if test_type not in TEST_TYPES:
         raise SystemExit(f"Unknown --test-type {test_type!r}; expected one of {TEST_TYPES}")
+    if side not in SIDES:
+        raise SystemExit(f"Unknown --side {side!r}; expected one of {SIDES}")
     if test_type != "difference" and not (margin and margin > 0):
         raise SystemExit(f"--test-type {test_type} requires a positive --margin")
+    if test_type != "difference" and side != "two-sided":
+        logger.warning(
+            "--side %s applies only to the difference test; the %s test is "
+            "inherently one-sided/TOST, so p_one_sided is reported but not the "
+            "primary p-value", side, test_type
+        )
 
     replicates = _load_replicates(metrics_dir, metric)
     if not replicates:
@@ -433,12 +492,14 @@ def run_pairwise_tests(
                 f"Selected: {', '.join(sel_modes)}"
             )
 
-    _PRIMARY_P = {
-        "difference": "p_diff",
-        "noninferiority": "p_noninf",
-        "equivalence": "p_equiv",
-    }
-    primary_key = _PRIMARY_P[test_type]
+    if test_type == "difference":
+        # A one-sided request makes p_one_sided the primary p; two-sided keeps
+        # the original p_diff. Both are always reported regardless.
+        primary_key = "p_diff" if side == "two-sided" else "p_one_sided"
+    elif test_type == "noninferiority":
+        primary_key = "p_noninf"
+    else:
+        primary_key = "p_equiv"
 
     logger.info(
         f"Comparing {len(sel_modes)} modes across {len(sel_datasets)} dataset(s) "
@@ -448,6 +509,7 @@ def run_pairwise_tests(
         f"design={comparison}"
         + (f" (reference={reference})" if comparison == "reference" else "")
         + f", test={test_type}, tie_rule={tie_rule}"
+        + (f", side={side}" if test_type == "difference" else "")
         + (f", margin={margin}" if test_type != "difference" else "")
     )
 
@@ -482,7 +544,7 @@ def run_pairwise_tests(
                         )
                         continue
 
-                    result = paired_bootstrap_test(a, b, tie_rule=tie_rule, margin=margin)
+                    result = paired_bootstrap_test(a, b, tie_rule=tie_rule, margin=margin, side=side)
                     diff = result["mean_diff"]
                     row = {
                         "dataset": dataset,
@@ -562,14 +624,15 @@ def write_stats_markdown(rows: list[dict], output_path: str) -> None:
                 f"Holm family n={row['family_size']})",
                 "",
                 "| mode_a | mode_b | mean_a | mean_b | diff | 95% CI | ties | "
-                "p_diff | p_noninf | p_equiv | p_holm | sig |",
-                "|---|---|---|---|---|---|---|---|---|---|---|---|",
+                "p_diff | p_1sided | p_noninf | p_equiv | p_holm | sig |",
+                "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
             ]
         ci = "—" if row["ci_low"] is None else f"[{row['ci_low']}, {row['ci_high']}]"
         lines.append(
             f"| {row['mode_a']} | {row['mode_b']} | {fmt(row['mean_a'])} | "
             f"{fmt(row['mean_b'])} | {fmt(row['mean_diff'])} | {ci} | "
-            f"{fmt(row['n_ties'])} | {fmt(row['p_diff'])} | {fmt(row['p_noninf'])} | "
+            f"{fmt(row['n_ties'])} | {fmt(row['p_diff'])} | {fmt(row['p_one_sided'])} | "
+            f"{fmt(row['p_noninf'])} | "
             f"{fmt(row['p_equiv'])} | {fmt(row['p_holm'])} | "
             f"{'**yes**' if row['significant_holm'] else 'no'} |"
         )
@@ -592,13 +655,14 @@ def run(
     tie_rule: str = "split",
     margin: float = DEFAULT_MARGIN,
     test_type: str = "difference",
+    side: str = "two-sided",
 ) -> list[dict]:
     """Entry point used by `main.py paired-bootstrap-tests`."""
     rows = run_pairwise_tests(
         metrics_dir=metrics_dir, metric=metric,
         modes=modes, datasets=datasets, models=models, alpha=alpha,
         comparison=comparison, reference=reference,
-        tie_rule=tie_rule, margin=margin, test_type=test_type,
+        tie_rule=tie_rule, margin=margin, test_type=test_type, side=side,
     )
     if not rows:
         # Still write the header so downstream steps don't crash on a missing file.
@@ -610,6 +674,10 @@ def run(
         # Encode the design in the default filename so successive runs answering
         # different questions do not silently overwrite one another.
         suffix = f"__{test_type}" if test_type != "difference" else ""
+        # A one-sided difference run answers a different question than the
+        # two-sided default, so keep them in separate files by default.
+        if test_type == "difference" and side != "two-sided":
+            suffix += f"__{side}"
         base = Path(DEFAULT_OUTPUT_DIR) / f"paired_bootstrap__{metric}__{comparison}{suffix}.csv"
     if fmt in ("csv", "both"):
         write_stats_csv(rows, str(base))
