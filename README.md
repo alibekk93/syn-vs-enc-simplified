@@ -97,7 +97,7 @@ Under every rule, two modes with identical predictions give p = 1.0.
 All analyses use ROC-AUC and a **one-sided** difference test, since each contrast has a logical direction. Scope is the four manuscript datasets; `pregnancy_outcome` is present in `results/` but excluded from the paper (drop `--datasets` to include it). `--side` is read relative to `mode_a`, which the reference design pins to the reference, so a vs-Real contrast (reference `standard`) uses `--side greater` to mean "the method is worse than Real".
 
 ```
-DATASETS="breast_cancer diabetes heart_disease maternal_health_risk"
+DATASETS="diabetes heart_disease maternal_health_risk pregnancy_outcome"
 
 # A1  Primary, synthetic leg: each generator at scale 100 vs Real.
 #     mode_a = standard, so "generator worse than Real" is standard > generator,
