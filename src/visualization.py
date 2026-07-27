@@ -1901,12 +1901,63 @@ def _radar_cfg(cfg):
     return d
 
 
+def _radar_synth_train_sub(df, m):
+    """
+    Rows for synthetic mode ``m`` at synth_scale=100, with ``train_time`` redefined
+    to the full one-time cost of standing up the deployed synthetic model:
+
+        train_time = synthesizer fit + sampling(scale 100) + downstream training
+
+    The generator is fit once per dataset and sampled once per dataset at scale
+    100, so both are dataset-level constants folded into every classifier cell of
+    that dataset. This makes the synthetic "Train t" axis comparable to the FHE
+    panel, whose train_time already includes its one-time compile.
+
+    Implementation notes:
+      - The synthesizer-fit cost lives in the standalone ``{synth}__synthesis__*``
+        profile (its synth_scale is NaN, so it sits outside the scale-100
+        selection); the sampling cost lives in the ``{synth}_100__sampling__*``
+        profile (model == "sampling"). Neither carries metrics.
+      - Those two profile rows are consumed to build the per-dataset offset and
+        then dropped, so they never form spurious "model" cells on the radar
+        (previously the sampling row leaked in as its own cell).
+      - train_time is CPU seconds summed over each stage's timed blocks, matching
+        how every other mode's train_time is computed.
+    """
+    scale_rows = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
+    if scale_rows.empty:
+        return scale_rows
+
+    # Downstream classifier rows only (drop the "sampling" pseudo-model row).
+    clf = scale_rows[scale_rows["model"] != "sampling"].copy()
+    if clf.empty:
+        return clf
+
+    # Per-dataset one-time costs, folded into every classifier cell for that
+    # dataset: sampling at scale 100, and the scale-independent synthesizer fit
+    # (which sits outside scale_rows because its synth_scale is NaN).
+    samp = (scale_rows[scale_rows["model"] == "sampling"]
+            .groupby("dataset")["train_time"].sum())
+    fit = (df[(df["mode"] == m) & (df["model"] == "synthesis")]
+           .groupby("dataset")["train_time"].sum())
+
+    offset = clf["dataset"].map(
+        lambda d: float(samp.get(d, 0.0)) + float(fit.get(d, 0.0))
+    )
+    clf["train_time"] = clf["train_time"].astype(float) + offset
+    return clf
+
+
 def _radar_select_modes(df, rcfg):
     """
     Ordered (raw_key, sub_df) for the primary modes present in ``df``:
     Real -> synthesizers at synth_scale=100 (alphabetical) -> FHE at the chosen
     bit-width. Mirrors the canonical _sort_raw_keys ordering. Modes with no rows
     are skipped so the figure degrades gracefully on a partial results set.
+
+    Synthetic subframes have ``train_time`` redefined by _radar_synth_train_sub to
+    the full one-time cost (synthesizer fit + scale-100 sampling + downstream
+    classifier fit), not just the downstream classifier fit.
     """
     out = []
     real = df[df["mode"] == "standard"]
@@ -1914,7 +1965,7 @@ def _radar_select_modes(df, rcfg):
         out.append(("standard", real))
 
     for m in sorted(rcfg["primary_synth"]):
-        sub = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
+        sub = _radar_synth_train_sub(df, m)
         if not sub.empty:
             out.append((m, sub))
 
