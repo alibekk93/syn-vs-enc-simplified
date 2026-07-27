@@ -402,23 +402,27 @@ _METRICS_CSV_RESOURCE_COLUMNS = [
 def _extract_resource_columns(profile: dict) -> dict:
     """Flatten a resource-profile JSON (as written by ResourceProfiler.save) into
     the scalar `_METRICS_CSV_RESOURCE_COLUMNS`. Missing sub-keys yield None."""
-    training_time  = profile.get("training_time", {}) or {}
-    inference_time = profile.get("inference_time", {}) or {}
-    memory         = profile.get("memory", {}) or {}
-    storage        = profile.get("storage", {}) or {}
-    fhe            = profile.get("fhe", {}) or {}
+    # Timing columns are sourced from CPU time (training_cpu_time / the
+    # inference_time.cpu_* fields), not wall clock: on the shared cluster
+    # wall-clock timings absorb node-contention noise, so CPU seconds are the
+    # contention-robust basis for comparing modes.
+    training_cpu_time = profile.get("training_cpu_time", {}) or {}
+    inference_time    = profile.get("inference_time", {}) or {}
+    memory            = profile.get("memory", {}) or {}
+    storage           = profile.get("storage", {}) or {}
+    fhe               = profile.get("fhe", {}) or {}
     mem_train = memory.get("training", {}) or {}
     mem_inf   = memory.get("inference", {}) or {}
 
     return {
-        # train_time sums every timed training block (fit, compile, ...), matching
-        # the aggregation in src/visualization.py.
-        "train_time":          round(sum(training_time.values()), 4) if training_time else None,
-        "synth_fit_time":      training_time.get("synthesis_fit"),
-        "fhe_fit_time":        training_time.get("training_fit"),
-        "fhe_compile_time":    training_time.get("training_compile"),
-        "inf_time_total":      inference_time.get("total"),
-        "inf_time_per_sample": inference_time.get("per_sample"),
+        # train_time sums every timed training block (fit, compile, ...) in CPU
+        # seconds, matching the aggregation in src/visualization.py.
+        "train_time":          round(sum(training_cpu_time.values()), 4) if training_cpu_time else None,
+        "synth_fit_time":      training_cpu_time.get("synthesis_fit"),
+        "fhe_fit_time":        training_cpu_time.get("training_fit"),
+        "fhe_compile_time":    training_cpu_time.get("training_compile"),
+        "inf_time_total":      inference_time.get("cpu_total"),
+        "inf_time_per_sample": inference_time.get("cpu_per_sample"),
         "mem_train_avg":       mem_train.get("average_mb"),
         "mem_train_peak":      mem_train.get("peak_mb"),
         "mem_inf_avg":         mem_inf.get("average_mb"),
