@@ -1901,50 +1901,69 @@ def _radar_cfg(cfg):
     return d
 
 
-def _radar_synth_train_sub(df, m):
+def _radar_synth_offsets(profiles_dir=None):
+    """
+    Per-(mode, dataset) one-time synthesis cost to fold into synthetic train_time:
+    the synthesizer fit plus the scale-100 sampling, in CPU seconds.
+
+    These live in the standalone ``{synth}__synthesis__{dataset}`` and
+    ``{synth}_100__sampling__{dataset}`` resource profiles, which have no matching
+    metrics file. load_simple_bootstrap merges profiles onto metrics with how="left",
+    so those rows are dropped and never reach the radar dataframe — they must be
+    read straight from the profile JSONs.
+
+    Returns {(mode, dataset): fit_plus_sample_seconds}. Each value sums the timed
+    blocks of the fit and sampling stages, matching how every other mode's
+    train_time is built. Missing profiles simply contribute nothing.
+    """
+    if profiles_dir is None:
+        profiles_dir = _profiles_dir_from_config()
+
+    def _load(path):
+        content = Path(path).read_text().strip()
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:      # tolerate trailing bytes, as load_simple_bootstrap does
+            obj, _ = json.JSONDecoder().raw_decode(content)
+            return obj
+
+    offsets = {}
+    for path in Path(profiles_dir).glob("*.json"):
+        meta = parse_filename_metadata(path.name)
+        model = meta.get("model")
+        if model not in ("synthesis", "sampling"):
+            continue
+        if model == "sampling" and meta.get("synth_scale") != 100:
+            continue                       # sampling counts only at scale 100
+        seconds = sum((_load(path).get("training_cpu_time") or {}).values())
+        key = (meta["mode"], meta["dataset"])
+        offsets[key] = offsets.get(key, 0.0) + seconds
+    return offsets
+
+
+def _radar_synth_train_sub(df, m, offsets):
     """
     Rows for synthetic mode ``m`` at synth_scale=100, with ``train_time`` redefined
     to the full one-time cost of standing up the deployed synthetic model:
 
         train_time = synthesizer fit + sampling(scale 100) + downstream training
 
-    The generator is fit once per dataset and sampled once per dataset at scale
-    100, so both are dataset-level constants folded into every classifier cell of
+    ``offsets`` maps (mode, dataset) -> (fit + scale-100 sampling) CPU seconds, from
+    _radar_synth_offsets. The metrics-keyed dataframe cannot carry those stages (see
+    that helper), so they are added here. The generator is fit and sampled once per
+    dataset, so each is a dataset-level constant added to every classifier cell of
     that dataset. This makes the synthetic "Train t" axis comparable to the FHE
     panel, whose train_time already includes its one-time compile.
-
-    Implementation notes:
-      - The synthesizer-fit cost lives in the standalone ``{synth}__synthesis__*``
-        profile (its synth_scale is NaN, so it sits outside the scale-100
-        selection); the sampling cost lives in the ``{synth}_100__sampling__*``
-        profile (model == "sampling"). Neither carries metrics.
-      - Those two profile rows are consumed to build the per-dataset offset and
-        then dropped, so they never form spurious "model" cells on the radar
-        (previously the sampling row leaked in as its own cell).
-      - train_time is CPU seconds summed over each stage's timed blocks, matching
-        how every other mode's train_time is computed.
     """
-    scale_rows = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
-    if scale_rows.empty:
-        return scale_rows
-
-    # Downstream classifier rows only (drop the "sampling" pseudo-model row).
-    clf = scale_rows[scale_rows["model"] != "sampling"].copy()
+    sel = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
+    # Defensive: under the current left-merge there are no "sampling" rows here,
+    # but drop them if a future outer-merge dataframe ever includes them.
+    clf = sel[sel["model"] != "sampling"].copy()
     if clf.empty:
         return clf
 
-    # Per-dataset one-time costs, folded into every classifier cell for that
-    # dataset: sampling at scale 100, and the scale-independent synthesizer fit
-    # (which sits outside scale_rows because its synth_scale is NaN).
-    samp = (scale_rows[scale_rows["model"] == "sampling"]
-            .groupby("dataset")["train_time"].sum())
-    fit = (df[(df["mode"] == m) & (df["model"] == "synthesis")]
-           .groupby("dataset")["train_time"].sum())
-
-    offset = clf["dataset"].map(
-        lambda d: float(samp.get(d, 0.0)) + float(fit.get(d, 0.0))
-    )
-    clf["train_time"] = clf["train_time"].astype(float) + offset
+    extra = clf["dataset"].map(lambda d: float(offsets.get((m, d), 0.0)))
+    clf["train_time"] = clf["train_time"].astype(float) + extra
     return clf
 
 
@@ -1964,8 +1983,9 @@ def _radar_select_modes(df, rcfg):
     if not real.empty:
         out.append(("standard", real))
 
+    synth_offsets = _radar_synth_offsets()
     for m in sorted(rcfg["primary_synth"]):
-        sub = _radar_synth_train_sub(df, m)
+        sub = _radar_synth_train_sub(df, m, synth_offsets)
         if not sub.empty:
             out.append((m, sub))
 
