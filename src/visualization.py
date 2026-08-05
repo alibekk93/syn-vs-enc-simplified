@@ -198,6 +198,24 @@ def _load_viz_config(path="config/visualization.yaml"):
 # DISPLAY HELPERS
 # ===========================================================
 
+def _save_figure_both_formats(fig, base_save_path, **savefig_kwargs):
+    """Save a matplotlib figure in PNG, SVG, and PDF formats.
+
+    Args:
+        fig: matplotlib figure object
+        base_save_path: Path without extension
+        **savefig_kwargs: additional arguments to pass to savefig
+    """
+    base_path = Path(base_save_path)
+    base_path.parent.mkdir(parents=True, exist_ok=True)
+
+    for fmt in ["png", "svg", "pdf"]:
+        save_path = base_path.with_suffix(f".{fmt}")
+        fig.savefig(save_path, format=fmt, **savefig_kwargs)
+
+
+
+
 def format_metric_name(metric):
     return metric.replace("_", " ").title()
 
@@ -502,10 +520,8 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
 
     plt.tight_layout()
 
-    fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"violinplot_{metric}__{dataset}__{model}.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"violinplot_{metric}__{dataset}__{model}"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close()
 
     return fig, ax
@@ -605,10 +621,8 @@ def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
         sns.despine(ax=ax)
         plt.tight_layout()
 
-        fmt       = fig_cfg["format"]
-        save_path = Path(save_dir) / f"fhe_training_breakdown__{dataset}.{fmt}"
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(save_path, format=fmt, bbox_inches="tight")
+        base_save_path = Path(save_dir) / f"fhe_training_breakdown__{dataset}"
+        _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
         plt.close()
 
 
@@ -702,10 +716,8 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
         )
         plt.tight_layout(rect=[0, 0.08, 1, 1])
 
-        fmt       = fig_cfg["format"]
-        save_path = Path(save_dir) / f"fhe_complexity_cost__{dataset}.{fmt}"
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        plt.savefig(save_path, format=fmt, bbox_inches="tight")
+        base_save_path = Path(save_dir) / f"fhe_complexity_cost__{dataset}"
+        _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
         plt.close()
 
 
@@ -823,10 +835,8 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
     sns.despine(ax=ax)
     plt.tight_layout()
 
-    fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"synth_scale_lines_{metric}__{dataset}__{model}.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"synth_scale_lines_{metric}__{dataset}__{model}"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close()
 
     return fig, ax
@@ -1036,10 +1046,8 @@ def plot_fhe_complexity_cost_multipanel(
 
     plt.tight_layout(rect=[0, 0.12, 1, 1])
 
-    fmt       = fig_cfg["format"]
-    save_path = Path(save_dir) / f"fhe_complexity_cost_multipanel.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"fhe_complexity_cost_multipanel"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close()
 
 
@@ -1175,10 +1183,8 @@ def plot_fhe_training_breakdown_multipanel(
 
     plt.tight_layout(rect=[0, 0.08, 1, 1])
 
-    fmt       = fig_cfg["format"]
-    save_path = Path(save_dir) / f"fhe_training_breakdown_multipanel.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"fhe_training_breakdown_multipanel"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close()
 
 
@@ -1344,10 +1350,8 @@ def plot_synth_scale_lines_multipanel(
 
     plt.tight_layout(rect=[0, 0.10, 1, 1])
 
-    fmt       = fig_cfg["format"]
-    save_path = Path(save_dir) / f"synth_scale_lines_{metric}_multipanel.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"synth_scale_lines_{metric}_multipanel"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close()
 
 
@@ -1459,9 +1463,8 @@ def plot_violinplot_multipanel(
         fig.suptitle(_fmt_dataset(dataset), fontsize=label_fs + 1, fontweight="bold")
         fig.supylabel(ylabel, fontsize=label_fs)   # single shared y-axis label
 
-        save_path = Path(save_dir) / f"violinplot_{metric}_multipanel__{dataset}.{fmt}"
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(save_path, format=fmt, bbox_inches="tight")
+        base_save_path = Path(save_dir) / f"violinplot_{metric}_multipanel__{dataset}"
+        _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
         plt.close(fig)
 
 
@@ -1696,10 +1699,8 @@ def _roc_grid_figure(preds, cfg, *, panel_curves, band_labels, annotate_labels,
     )
     plt.tight_layout(rect=[0, bottom_frac, 1, 1])
 
-    fmt = cfg["figures"]["format"]
-    save_path = Path(save_dir) / f"{save_name}.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / save_name
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -2246,10 +2247,8 @@ def plot_radar_overview_multipanel(
     fig.subplots_adjust(left=0.06, right=0.94, top=0.88, bottom=0.09,
                         wspace=0.55, hspace=0.72)
 
-    fmt = fig_cfg["format"]
-    save_path = Path(save_dir) / f"radar_overview_multipanel.{fmt}"
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(save_path, format=fmt, bbox_inches="tight")
+    base_save_path = Path(save_dir) / f"radar_overview_multipanel"
+    _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close(fig)
 
 
