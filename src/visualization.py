@@ -211,7 +211,11 @@ def _save_figure_both_formats(fig, base_save_path, **savefig_kwargs):
 
     for fmt in ["png", "svg", "pdf"]:
         save_path = base_path.with_suffix(f".{fmt}")
-        fig.savefig(save_path, format=fmt, **savefig_kwargs)
+        fmt_kwargs = savefig_kwargs.copy()
+        # PDF gets minimal padding to reduce whitespace; override default pad_inches=0.1
+        if fmt == "pdf" and "pad_inches" not in savefig_kwargs:
+            fmt_kwargs["pad_inches"] = 0.02
+        fig.savefig(save_path, format=fmt, **fmt_kwargs)
 
 
 
