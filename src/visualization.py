@@ -859,11 +859,13 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
 _IEEE_FULL_WIDTH_IN = 7.16
 
 _DATASET_LABELS = {
-    "breast_cancer": "Breast Cancer",
+    "cardiotocography": "Cardiotocography",
     "diabetes": "Diabetes",
+    "gestational_diabetes": "Gest. Diabetes",
     "heart_disease": "Heart Disease",
+    "heart_failure": "Heart Failure",
+    "mammographic_mass": "Mammographic Mass",
     "maternal_health_risk": "Maternal Health",
-    "pregnancy_outcome": "Preg. Outcome",
 }
 
 _MODEL_ABBREV = {

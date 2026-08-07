@@ -68,22 +68,6 @@ diabetes:
       columns: []
       steps: []
 
-breast_cancer:
-  features: [mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness, mean_compactness, mean_concavity, mean_concave_points, mean_symmetry, mean_fractal_dimension, radius_error, texture_error, perimeter_error, area_error, smoothness_error, compactness_error, concavity_error, concave_points_error, symmetry_error, fractal_dimension_error, worst_radius, worst_texture, worst_perimeter, worst_area, worst_smoothness, worst_compactness, worst_concavity, worst_concave_points, worst_symmetry, worst_fractal_dimension]
-  target: malignant
-  preprocessing:
-    binarize_target:
-      enabled: false
-      threshold: null
-    numeric:
-      columns: [mean_radius, mean_texture, mean_perimeter, mean_area, mean_smoothness, mean_compactness, mean_concavity, mean_concave_points, mean_symmetry, mean_fractal_dimension, radius_error, texture_error, perimeter_error, area_error, smoothness_error, compactness_error, concavity_error, concave_points_error, symmetry_error, fractal_dimension_error, worst_radius, worst_texture, worst_perimeter, worst_area, worst_smoothness, worst_compactness, worst_concavity, worst_concave_points, worst_symmetry, worst_fractal_dimension]
-      steps:
-        - impute_median
-        - standard_scale
-    categorical:
-      columns: []
-      steps: []
-
 maternal_health_risk:
   features: [Age, SystolicBP, DiastolicBP, BS, BodyTemp, HeartRate]
   target: RiskLevel
@@ -100,15 +84,39 @@ maternal_health_risk:
       columns: []
       steps: []
 
-pregnancy_outcome:
-  features: [Age, Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction]
-  target: Outcome
+# The undeclared `Case Number` row identifier is dropped at load time — see the
+# note in src/dataset.py load().
+gestational_diabetes:
+  features: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sys BP, Dia BP, OGTT, Hemoglobin, Sedentary Lifestyle, Prediabetes]
+  target: Class Label(GDM /Non GDM)
   preprocessing:
     binarize_target:
       enabled: false
       threshold: null
     numeric:
-      columns: [Age, Pregnancies, Glucose, BloodPressure, SkinThickness, Insulin, BMI, DiabetesPedigreeFunction]
+      columns: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Sys BP, Dia BP, OGTT, Hemoglobin]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: [Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sedentary Lifestyle, Prediabetes]
+      steps: [impute_mode]
+
+# `CLASS` (the 10-level morphologic pattern) is deliberately absent from `features`:
+# it is a second label for the same recording and is dropped at load time. Keeping
+# it would leak the target.
+cardiotocography:
+  features: [LB, AC, FM, UC, DL, DS, DP, ASTV, MSTV, ALTV, MLTV, Width, Min, Max, Nmax, Nzeros, Mode, Mean, Median, Variance, Tendency]
+  target: NSP
+  preprocessing:
+    binarize_target:
+      # NSP: 1 = Normal, 2 = Suspect, 3 = Pathologic. Threshold 2 splits normal
+      # from any abnormality, matching how heart_disease and maternal_health_risk
+      # binarize their ordinal targets.
+      enabled: true
+      threshold: 2
+    numeric:
+      columns: [LB, AC, FM, UC, DL, DS, DP, ASTV, MSTV, ALTV, MLTV, Width, Min, Max, Nmax, Nzeros, Mode, Mean, Median, Variance, Tendency]
       steps:
         - impute_median
         - standard_scale
@@ -116,18 +124,40 @@ pregnancy_outcome:
       columns: []
       steps: []
 
-# gestational_diabetes:
-#  features: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sys BP, Dia BP, OGTT, Hemoglobin, Sedentary Lifestyle, Prediabetes]
-#  target: Class Label(GDM /Non GDM)
-#  preprocessing:
-#    binarize_target:
-#      enabled: false
-#      threshold: null
-#    numeric:
-#      columns: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Sys BP, Dia BP, OGTT, Hemoglobin]
-#      steps:
-#        - impute_median
-#        - standard_scale
-#    categorical:
-#      columns: [Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sedentary Lifestyle, Prediabetes]
-#      steps: [impute_mode]
+# `BI-RADS` is deliberately absent from `features`: it is the radiologist's own
+# assessment of the mass, labelled non-predictive by the dataset authors, and is
+# dropped at load time.
+mammographic_mass:
+  features: [Age, Shape, Margin, Density]
+  target: Severity
+  preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
+    numeric:
+      columns: [Age, Shape, Margin, Density]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: []
+      steps: []
+
+# `time` is deliberately absent from `features`: it is the follow-up duration in
+# days, is not available at prediction time, and on its own dominates death_event.
+# Dropped at load time.
+heart_failure:
+  features: [age, anaemia, creatinine_phosphokinase, diabetes, ejection_fraction, high_blood_pressure, platelets, serum_creatinine, serum_sodium, sex, smoking]
+  target: death_event
+  preprocessing:
+    binarize_target:
+      enabled: false
+      threshold: null
+    numeric:
+      columns: [age, anaemia, creatinine_phosphokinase, diabetes, ejection_fraction, high_blood_pressure, platelets, serum_creatinine, serum_sodium, sex, smoking]
+      steps:
+        - impute_median
+        - standard_scale
+    categorical:
+      columns: []
+      steps: []

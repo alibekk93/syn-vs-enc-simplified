@@ -109,12 +109,18 @@ class Dataset:
         #
         # Nothing downstream filters on `features`: Model/FHEModel build their
         # design matrix as df.drop(columns=[target]), so *any* surplus column in
-        # the raw CSV silently becomes a predictor. Both pregnancy_outcome and
-        # gestational_diabetes ship a row-identifier column that is not declared
-        # here, is therefore never scaled or imputed, and — because the rows are
-        # ordered by class — predicts the target almost perfectly on its own
-        # (PatientID alone: test ROC-AUC 1.00). Dropping undeclared columns at
-        # load time makes `features` authoritative.
+        # the raw CSV silently becomes a predictor. gestational_diabetes ships a
+        # row-identifier column that is not declared here, is therefore never
+        # scaled or imputed, and — because the rows are ordered by class —
+        # predicts the target almost perfectly on its own (an ID column alone
+        # reached test ROC-AUC 1.00). Dropping undeclared columns at load time
+        # makes `features` authoritative.
+        #
+        # Three more datasets rely on this same filter to exclude a column that
+        # would leak: cardiotocography's CLASS (a second label for the same
+        # recording), mammographic_mass's BI-RADS (the radiologist's own
+        # assessment), and heart_failure's time (follow-up duration, unavailable
+        # at prediction time). See the notes on those entries in datasets.yaml.
         #
         # Done before preprocess() so that columns derived later (e.g. one-hot
         # expansions, which are not listed in `features`) are not dropped.
