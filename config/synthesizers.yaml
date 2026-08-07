@@ -41,16 +41,19 @@
 synth_scale:
   values: [100, 150, 200, 250, 300]   # percentages of original dataset size; 100 = same size
 
-split:
-  test_size: 0.2
-  random_state: 42
-  stratify: true
+# NOTE ON THE TRAIN/TEST SPLIT
+#   The split parameters (test_size, random_seed, stratify) live in
+#   config/models.yaml and are read from there by the synthesizer as well. They
+#   are deliberately not duplicated here: src/dataset.py fits the imputation and
+#   scaling constants on the training partition only, and it can do that for a
+#   file it writes whole solely because every splitter draws the identical split.
+#   A second copy of these values that drifted from models.yaml would put test
+#   rows into the synthesizer's training data and into the preprocessing fit.
 
 # NOTE ON REPRODUCIBILITY
-#   `random_state` above seeds the train/test split only — it is NOT passed to
-#   the synthesizers, and none of the methods below set a seed of their own. Two
-#   runs of the same method on the same data therefore produce different
-#   synthetic datasets.
+#   The split seed is NOT passed to the synthesizers, and none of the methods
+#   below set a seed of their own. Two runs of the same method on the same data
+#   therefore produce different synthetic datasets.
 #
 #   This matters because jobs/submit_array_synth.sh submits one job per
 #   (dataset, synthesizer, model), so the three model jobs for a given

@@ -92,7 +92,8 @@ def run(
             synth_profiler = ResourceProfiler(load_config(resource_config))
 
             try:
-                synth = Synthesizer(synth_name, cfg=synthesizers_config, device=active_device)
+                synth = Synthesizer(synth_name, cfg=synthesizers_config, device=active_device,
+                                    models_cfg=models_config)
 
                 # Force the backing library import before anything is timed,
                 # so synthesis_fit measures fitting rather than importing.

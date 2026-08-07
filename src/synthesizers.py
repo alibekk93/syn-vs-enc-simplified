@@ -144,7 +144,8 @@ class Synthesizer:
 
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str = "config/synthesizers.yaml", device: str | None = None):
+    def __init__(self, name: str, cfg: str = "config/synthesizers.yaml", device: str | None = None,
+                 models_cfg: str = "config/models.yaml"):
         """
         Args:
             name:   Synthesizer name — must be a key in config and SUPPORTED_SYNTHESIZERS
@@ -153,6 +154,12 @@ class Synthesizer:
                     cpu). Only applied for GPU_CAPABLE_SYNTHESIZERS (ctgan, nflow,
                     arf) — gaussian_copula and bayesian_network have no GPU path
                     and ignore it.
+            models_cfg: Path to models.yaml, read for the train/test split
+                    parameters. These used to be duplicated under `split:` in
+                    synthesizers.yaml; they are single-sourced now because
+                    src/dataset.py fits its preprocessing constants on the
+                    training partition and every splitter has to agree on which
+                    rows those are.
         """
         all_cfg = load_config(cfg)
         output_cfg             = all_cfg.get("output", {})
@@ -162,14 +169,14 @@ class Synthesizer:
             available = [k for k in methods_cfg]
             raise KeyError(f"Synthesizer '{name}' not found in config. Available: {available}")
 
+        split_cfg              = load_config(models_cfg)
         self.name              = name
         self.cfg               = all_cfg
         self.synth_cfg         = methods_cfg[name]
-        self.split_cfg         = all_cfg.get("split", {})
         self.method            = name
-        self.test_size         = self.split_cfg.get("test_size", None)
-        self.random_state      = self.split_cfg.get("random_state", 42)
-        self.stratify          = self.split_cfg.get("stratify", False)
+        self.test_size         = split_cfg.get("test_size", 0.2)
+        self.random_state      = split_cfg.get("random_seed", 42)
+        self.stratify          = split_cfg.get("stratify", False)
 
         if self.method not in SUPPORTED_SYNTHESIZERS:
             raise KeyError(f"Method '{self.method}' is not supported. Supported: {list(SUPPORTED_SYNTHESIZERS)}")

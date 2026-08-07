@@ -11,12 +11,15 @@ DATASETS_CFG = "config/datasets.yaml"
 RESOURCE_CFG = "config/resource_profiling.yaml"
 
 
-def run(datasets: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml") -> dict:
+def run(datasets: list[str] | None = None, datasets_config: str = "config/datasets.yaml", resource_config: str = "config/resource_profiling.yaml", models_config: str = "config/models.yaml") -> dict:
     """
     Args:
         datasets: List of dataset names to process. If None, all datasets are processed.
         datasets_config: Path to datasets configuration file.
         resource_config: Path to resource profiling configuration file.
+        models_config: Path to models configuration file. Supplies the train/test
+            split parameters that Dataset.preprocess() fits on — must be the same
+            file the model stages read, or the split it reproduces will not match.
 
     Returns:
         Dict of {dataset: processing_results}
@@ -31,7 +34,7 @@ def run(datasets: list[str] | None = None, datasets_config: str = "config/datase
         profiler = ResourceProfiler(load_config(resource_config))
 
         try:
-            dataset = Dataset(name, cfg=datasets_config)
+            dataset = Dataset(name, cfg=datasets_config, models_cfg=models_config)
 
             # Only one memory phase in preprocessing (no separate inference).
             profiler.start_memory_sampling(phase="processing")

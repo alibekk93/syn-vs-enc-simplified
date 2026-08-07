@@ -222,7 +222,8 @@ def run(
                 prep_results = preprocessing.run(
                     datasets=[dataset_name],
                     datasets_config=str(configs["datasets"]),
-                    resource_config=str(configs["resource"])
+                    resource_config=str(configs["resource"]),
+                    models_config=str(configs["models"])
                 )
 
             if pipelines_cfg.get("raw"):

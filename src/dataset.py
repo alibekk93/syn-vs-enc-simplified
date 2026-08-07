@@ -7,23 +7,30 @@ import numpy as np
 
 from src.utils import atomic_path
 from pathlib import Path
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, OneHotEncoder
 
 logger = logging.getLogger(__name__)
 
+
+def _scale(scaler, df, cols, tr):
+    """Fit the scaler on the training rows, apply it to every row."""
+    scaler.fit(df.loc[tr, cols])
+    return pd.DataFrame(scaler.transform(df[cols]), columns=cols, index=df.index)
+
+
+# Every step takes (df, cols, tr) where `tr` indexes the training rows: constants
+# are estimated from df.loc[tr] only and then applied to the whole column. See
+# Dataset.preprocess() for how `tr` is kept identical to the split the models draw.
 NUMERIC_STEPS = {
-    "impute_median":  lambda df, cols: df[cols].fillna(df[cols].median()),
-    "impute_mean":    lambda df, cols: df[cols].fillna(df[cols].mean()),
-    "standard_scale": lambda df, cols: pd.DataFrame(
-        StandardScaler().fit_transform(df[cols]), columns=cols, index=df.index
-    ),
-    "minmax_scale":   lambda df, cols: pd.DataFrame(
-        MinMaxScaler().fit_transform(df[cols]), columns=cols, index=df.index
-    ),
+    "impute_median":  lambda df, cols, tr: df[cols].fillna(df.loc[tr, cols].median()),
+    "impute_mean":    lambda df, cols, tr: df[cols].fillna(df.loc[tr, cols].mean()),
+    "standard_scale": lambda df, cols, tr: _scale(StandardScaler(), df, cols, tr),
+    "minmax_scale":   lambda df, cols, tr: _scale(MinMaxScaler(), df, cols, tr),
 }
 
 CATEGORICAL_STEPS = {
-    "impute_mode":   lambda df, cols: df[cols].fillna(df[cols].mode().iloc[0]),
+    "impute_mode":   lambda df, cols, tr: df[cols].fillna(df.loc[tr, cols].mode().iloc[0]),
     "onehot_encode": None,  # handled separately — changes column layout
 }
 
@@ -45,11 +52,16 @@ class Dataset:
     RAW_DIR       = Path("data/raw")
     PROCESSED_DIR = Path("data/processed")
 
-    def __init__(self, name: str, cfg: str):
+    def __init__(self, name: str, cfg: str, models_cfg: str = "config/models.yaml"):
         """
         Args:
-            name: Dataset name — used to find config entry and resolve file paths
-            cfg:  Path to datasets.yaml
+            name:       Dataset name — used to find config entry and resolve file paths
+            cfg:        Path to datasets.yaml
+            models_cfg: Path to models.yaml. Read for the train/test split parameters
+                        only. preprocess() has to draw the very same split that
+                        Model.split()/FHEModel.split()/Synthesizer.load_data() will
+                        draw later, so those parameters live in exactly one file and
+                        every splitter reads them from there.
         """
         from src.utils import load_config
 
@@ -61,6 +73,11 @@ class Dataset:
         self.cfg      = all_cfg[name]
         self.features: list = self.cfg.get("features") or []
         self.target:   str  = self.cfg.get("target")
+
+        split_cfg      = load_config(models_cfg)
+        self.test_size = split_cfg.get("test_size", 0.2)
+        self.seed      = split_cfg.get("random_seed", 42)
+        self.stratify  = split_cfg.get("stratify", False)
 
         raw_cfg            = self.cfg.get("raw_path")
         self.raw_path      = Path(raw_cfg) if raw_cfg else self.RAW_DIR / f"{self.name}.csv"
@@ -120,13 +137,44 @@ class Dataset:
         return df
 
     def preprocess(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply preprocessing steps from config."""
+        """Apply preprocessing steps from config, fitting every constant on the
+        training partition only.
+
+        The processed file is written whole and split downstream, so this method
+        reproduces the split rather than storing it: train_test_split derives one
+        index permutation from (n_samples, test_size, random_state, stratify
+        labels) and applies it to whatever arrays it is handed — feature values
+        never enter the draw. Model.split(), FHEModel.split() and
+        Synthesizer.load_data() call it on this same row count with these same
+        target labels and parameters, so `train_idx` below is exactly the set of
+        rows they will call train.
+
+        Two things this relies on, both enforced here: the target is binarized
+        before the draw, so the stratify labels match what the splitters see; and
+        no step reorders or drops rows, only columns.
+        """
         df   = df.copy()
         prep = self.cfg.get("preprocessing", {})
 
-        # --- Binarize target ---
+        # --- Binarize target (must precede the draw: it defines the stratify labels) ---
         df = self._binarize_target(df, prep.get("binarize_target", {}))
         df[self.target] = df[self.target].astype(int)
+
+        # --- Reproduce the downstream train/test split ---
+        # Split the target Series and keep its index: the returned labels are the
+        # row labels the downstream splitters will hand to their own train sets.
+        y = df[self.target]
+        y_train, y_test = train_test_split(
+            y,
+            test_size=self.test_size,
+            random_state=self.seed,
+            stratify=y if self.stratify else None,
+        )
+        train_idx, test_idx = y_train.index, y_test.index
+        logger.info(
+            f"[{self.name}] Fitting preprocessing on {len(train_idx)} train rows "
+            f"({len(test_idx)} held out, seed={self.seed}, stratify={self.stratify})"
+        )
 
         # --- Numeric ---
         num_cfg  = prep.get("numeric", {})
@@ -136,7 +184,7 @@ class Dataset:
             for step in (num_cfg.get("steps") or []):
                 if step not in NUMERIC_STEPS:
                     raise ValueError(f"Unknown numeric step: '{step}'")
-                df[num_cols] = NUMERIC_STEPS[step](df, num_cols)
+                df[num_cols] = NUMERIC_STEPS[step](df, num_cols, train_idx)
                 logger.info(f"[{self.name}] [numeric] {step} → {num_cols}")
 
         # --- Categorical ---
@@ -145,10 +193,10 @@ class Dataset:
         if cat_cols:
             for step in (cat_cfg.get("steps") or []):
                 if step == "onehot_encode":
-                    df = self._onehot(df, cat_cols)
+                    df = self._onehot(df, cat_cols, train_idx)
                     logger.info(f"[{self.name}] [categorical] onehot_encode → {cat_cols}")
                 elif step in CATEGORICAL_STEPS:
-                    df[cat_cols] = CATEGORICAL_STEPS[step](df, cat_cols)
+                    df[cat_cols] = CATEGORICAL_STEPS[step](df, cat_cols, train_idx)
                     logger.info(f"[{self.name}] [categorical] {step} → {cat_cols}")
                 else:
                     raise ValueError(f"Unknown categorical step: '{step}'")
@@ -186,9 +234,12 @@ class Dataset:
         logger.info(f"[{self.name}] Binarized '{self.target}' with threshold={threshold}")
         return df
 
-    def _onehot(self, df: pd.DataFrame, cols: list) -> pd.DataFrame:
+    def _onehot(self, df: pd.DataFrame, cols: list, tr) -> pd.DataFrame:
+        # Categories are learned from the training rows only; handle_unknown="ignore"
+        # encodes a level that appears solely in the test rows as an all-zero block.
         enc     = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
-        encoded = enc.fit_transform(df[cols])
+        enc.fit(df.loc[tr, cols])
+        encoded = enc.transform(df[cols])
         enc_df  = pd.DataFrame(
             encoded, columns=enc.get_feature_names_out(cols), index=df.index
         )
