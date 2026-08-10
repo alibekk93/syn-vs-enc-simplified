@@ -873,6 +873,20 @@ _DATASET_LABELS = {
     "maternal_health_risk": "Maternal Health",
 }
 
+# Row labels for the transposed grids (see _grid_fig_height). Once the dataset
+# moves from the column title to the y-axis its budget is the panel HEIGHT rather
+# than the panel width, so the long names are broken over two lines instead of
+# running into the neighbouring panel.
+_DATASET_ROW_LABELS = {
+    "cardiotocography":     "Cardio-\ntocography",
+    "diabetes":             "Diabetes",
+    "gestational_diabetes": "Gest.\nDiabetes",
+    "heart_disease":        "Heart\nDisease",
+    "heart_failure":        "Heart\nFailure",
+    "mammographic_mass":    "Mammographic\nMass",
+    "maternal_health_risk": "Maternal\nHealth",
+}
+
 _MODEL_ABBREV = {
     "logistic_regression": "LR",
     "random_forest": "RF",
@@ -907,6 +921,37 @@ def _mode_short_code(mode_key: str) -> str:
     if mode_key in _MODE_SHORT:
         return _MODE_SHORT[mode_key]
     return "".join(w[0] for w in mode_key.split("_")).upper()  # fallback initials
+
+
+def _dataset_row_label(name: str) -> str:
+    """Dataset label for the y-axis of a transposed grid (may contain a newline)."""
+    return _DATASET_ROW_LABELS.get(name, _fmt_dataset(name))
+
+
+# ---- Transposed grid geometry -------------------------------------------------
+#
+# The grids below put DATASETS on rows and the fixed-cardinality variable (model or
+# metric) on columns. Datasets are the dimension that grows while figure width is
+# the dimension a journal caps, so binding datasets to columns shrank every panel
+# with each dataset added: at 6 datasets the column pitch is ~1.1 in while an 8 pt
+# title such as "Mammographic Mass" is ~1.13 in wide, i.e. wider than its own
+# column. With 2-3 columns instead, panel width roughly doubles and the dataset
+# name moves to the y-axis, where two-line labels cost nothing.
+#
+# Figure height is derived from the row count rather than hardcoded, so the grid
+# neither overflows the page nor leaves the dead vertical band a fixed height left
+# behind once the row count changed.
+_GRID_CHROME_IN = 1.05        # column titles + bottom axis label + x tick labels
+
+
+def _grid_fig_height(n_row, row_height, legend_rows=1):
+    """Total figure height for a transposed grid, in inches."""
+    return row_height * n_row + _GRID_CHROME_IN + 0.16 * legend_rows
+
+
+def _grid_bottom_frac(fig_h, legend_rows=1):
+    """tight_layout bottom margin (figure fraction) reserving the shared legend."""
+    return (0.34 + 0.15 * legend_rows) / fig_h
 
 
 def _add_panel_label(ax, idx: int, fontsize: int = 8, x: float = -0.14, suffix: str = ""):
@@ -950,9 +995,10 @@ def plot_fhe_complexity_cost_multipanel(
     """
     IEEE double-column multipanel figure — FHE complexity cost.
 
-    Layout: 2 rows × N_datasets columns.
-      Row 0: precision (n_bits) vs compile time.
-      Row 1: precision (n_bits) vs inference time per sample.
+    Layout: N_datasets rows × 2 columns — datasets on rows so the panel width is
+    set by the two metrics rather than by the dataset count (see _grid_fig_height).
+      Col 0: precision (n_bits) vs compile time.
+      Col 1: precision (n_bits) vs inference time per sample.
     Each line is one model.  n_bits on x-axis is the natural control variable;
     the original circuit-complexity x-axis had near-identical values for all
     points (narrow range), making the scatter unreadable.
@@ -982,32 +1028,38 @@ def plot_fhe_complexity_cost_multipanel(
     datasets      = sorted(full_agg["dataset"].dropna().unique())
     models_sorted = sorted(full_agg["model"].unique())
     n_bits_sorted = sorted(full_agg["n_bits"].unique())
-    n_col         = len(datasets)
+    n_row         = len(datasets)
 
     model_palette = cfg.get("model_line_colors", _MODEL_COLORS)
     model_markers = {m: _FHE_MARKERS[i % len(_FHE_MARKERS)] for i, m in enumerate(models_sorted)}
     model_colors  = {m: model_palette[i % len(model_palette)]  for i, m in enumerate(models_sorted)}
 
+    # Metrics are now the columns, so their names (with units) become the column
+    # titles and the y-axis carries the dataset instead.
     panels = [
         ("fhe_compile_time",    "Compile Time (s)"),
         ("inf_time_per_sample", "Inf. Time / Sample (s)"),
     ]
+    n_col = len(panels)
 
     tick_fs  = 7
     label_fs = 8
 
+    fig_h       = _grid_fig_height(n_row, row_height=1.05, legend_rows=1)
+    bottom_frac = _grid_bottom_frac(fig_h, legend_rows=1)
+
     fig, axes = plt.subplots(
-        2, n_col,
-        figsize=(_IEEE_FULL_WIDTH_IN, 3.6),
-        sharex="col",  # same n_bits x-axis per column (same for all datasets, but keeps ticks tidy)
+        n_row, n_col,
+        figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
+        sharex="col",  # same n_bits x-axis down each metric column
         sharey=False,  # independent y-scale per panel
         squeeze=False,
     )
 
-    for col_idx, dataset in enumerate(datasets):
+    for row_idx, dataset in enumerate(datasets):
         d_agg = full_agg[full_agg["dataset"] == dataset]
 
-        for row_idx, (y_col, y_label) in enumerate(panels):
+        for col_idx, (y_col, y_label) in enumerate(panels):
             ax = axes[row_idx, col_idx]
 
             for model in models_sorted:
@@ -1026,15 +1078,16 @@ def plot_fhe_complexity_cost_multipanel(
             sns.despine(ax=ax)
 
             if col_idx == 0:
-                ax.set_ylabel(y_label, fontsize=label_fs, labelpad=3)
+                ax.set_ylabel(_dataset_row_label(dataset), fontsize=label_fs,
+                              labelpad=3)
 
-            if row_idx == len(panels) - 1:
+            if row_idx == n_row - 1:
                 ax.set_xlabel("Precision (bits)", fontsize=label_fs, labelpad=3)
 
             if row_idx == 0:
-                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+                ax.set_title(y_label, fontsize=label_fs, pad=4)
 
-            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs)
+            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs, x=0.0)
 
     # Shared legend — only model entries needed (n_bits is now the x-axis)
     legend_fs = 7
@@ -1055,7 +1108,7 @@ def plot_fhe_complexity_cost_multipanel(
         columnspacing=1.0,
     )
 
-    plt.tight_layout(rect=[0, 0.12, 1, 1])
+    plt.tight_layout(rect=[0, bottom_frac, 1, 1])
 
     base_save_path = Path(save_dir) / f"fhe_complexity_cost_multipanel"
     _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
@@ -1068,11 +1121,12 @@ def plot_fhe_training_breakdown_multipanel(
     """
     IEEE double-column multipanel figure — FHE training time breakdown.
 
-    Layout: 1 row × N_datasets columns, horizontal stacked bars.
+    Layout: N_datasets rows × N_models columns, horizontal stacked bars.
       Grey segment  = fit time.
       Coloured segment = compile time (blue gradient, shade = n_bits).
-    Panels share the same y-axis (model × precision categories) so the
-    category labels appear only once on the left.
+    Datasets sit on rows (see _grid_fig_height) and the model moves from the bar
+    categories to the columns, so a panel carries one bar per precision (6) rather
+    than model × precision (18) and the shared y labels shorten to "8b".
     Saved as: fhe_training_breakdown_multipanel.{fmt}
     """
     from matplotlib.patches import Patch
@@ -1084,7 +1138,6 @@ def plot_fhe_training_breakdown_multipanel(
     fhe_gcfg = cfg.get("groups", {}).get("fhe", {})
     breakdown_cfg = cfg.get("fhe_breakdown", {})
     fit_color     = breakdown_cfg.get("fit_color", "#cccccc")
-    divider_color = breakdown_cfg.get("group_divider_color", "#dddddd")
 
     _apply_publication_style(cfg)
 
@@ -1103,13 +1156,11 @@ def plot_fhe_training_breakdown_multipanel(
     datasets      = sorted(full_agg["dataset"].dropna().unique())
     models_sorted = sorted(full_agg["model"].unique())
     n_bits_sorted = sorted(full_agg["n_bits"].unique())
-    n_col         = len(datasets)
+    n_row, n_col  = len(datasets), len(models_sorted)
 
-    # Canonical bar order: outer = model (alphabetical), inner = n_bits (ascending)
-    y_categories = [
-        (model, int(nb)) for model in models_sorted for nb in n_bits_sorted
-    ]
-    y_labels_left = [f"{_abbrev_model(m)} {n}b" for m, n in y_categories]
+    # Bar categories are now precision alone (the model is the column), ascending.
+    y_categories  = [int(nb) for nb in n_bits_sorted]
+    y_labels_left = [f"{nb}b" for nb in y_categories]
     n_bars = len(y_categories)
     y_pos  = list(range(n_bars))
 
@@ -1123,11 +1174,14 @@ def plot_fhe_training_breakdown_multipanel(
     label_fs = 8
     bar_h    = 0.60
 
-    fig_h = max(3.0, n_bars * 0.22 + 0.8)
+    fig_h       = _grid_fig_height(n_row, row_height=1.15, legend_rows=1)
+    bottom_frac = _grid_bottom_frac(fig_h, legend_rows=1)
+
     fig, axes = plt.subplots(
-        1, n_col,
+        n_row, n_col,
         figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
-        sharey=True,
+        sharey=True,    # identical precision categories -> tick labels once, on col 0
+        sharex=False,   # absolute times differ by orders of magnitude across datasets
         squeeze=False,
     )
 
@@ -1138,44 +1192,45 @@ def plot_fhe_training_breakdown_multipanel(
         v = row[col]
         return float(v) if pd.notna(v) else 0.0
 
-    for col_idx, dataset in enumerate(datasets):
-        ax    = axes[0, col_idx]
+    for row_idx, dataset in enumerate(datasets):
         d_agg = full_agg[full_agg["dataset"] == dataset]
-        d_lut = {(r["model"], int(r["n_bits"])): r for _, r in d_agg.iterrows()}
 
-        fit_vals     = [_safe_val(d_lut, cat, "fhe_fit_time")     for cat in y_categories]
-        compile_vals = [_safe_val(d_lut, cat, "fhe_compile_time") for cat in y_categories]
-        bar_colors   = [nbits_color[nb] for _, nb in y_categories]
+        for col_idx, model in enumerate(models_sorted):
+            ax    = axes[row_idx, col_idx]
+            m_agg = d_agg[d_agg["model"] == model]
+            d_lut = {int(r["n_bits"]): r for _, r in m_agg.iterrows()}
 
-        ax.barh(y_pos, fit_vals,     height=bar_h, color=fit_color,   zorder=2)
-        ax.barh(y_pos, compile_vals, height=bar_h, color=bar_colors,
-                left=fit_vals, zorder=2)
+            fit_vals     = [_safe_val(d_lut, nb, "fhe_fit_time")     for nb in y_categories]
+            compile_vals = [_safe_val(d_lut, nb, "fhe_compile_time") for nb in y_categories]
+            bar_colors   = [nbits_color[nb] for nb in y_categories]
 
-        ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
-        ax.set_xlabel("Time (s)", fontsize=label_fs, labelpad=3)
-        ax.tick_params(labelsize=tick_fs, length=3, pad=2)
-        sns.despine(ax=ax)
+            ax.barh(y_pos, fit_vals,     height=bar_h, color=fit_color,   zorder=2)
+            ax.barh(y_pos, compile_vals, height=bar_h, color=bar_colors,
+                    left=fit_vals, zorder=2)
 
-        _add_panel_label(ax, col_idx, fontsize=label_fs)
+            ax.tick_params(labelsize=tick_fs, length=3, pad=2)
+            sns.despine(ax=ax)
 
-    # y-tick labels only on leftmost panel (sharey hides the rest automatically)
+            if row_idx == 0:
+                ax.set_title(_abbrev_model(model), fontsize=label_fs, pad=4)
+            if row_idx == n_row - 1:
+                ax.set_xlabel("Time (s)", fontsize=label_fs, labelpad=3)
+            if col_idx == 0:
+                ax.set_ylabel(_dataset_row_label(dataset), fontsize=label_fs,
+                              labelpad=3)
+
+            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs, x=0.0)
+
+    # Precision categories are shared, so the tick labels are set once (sharey
+    # propagates the formatter and hides the duplicates on columns 1..n).
     axes[0, 0].set_yticks(y_pos)
-    axes[0, 0].set_yticklabels(y_labels_left, fontsize=tick_fs)
+    axes[0, 0].set_yticklabels(y_labels_left)
     for ax in axes.flat:
         ax.set_ylim(-0.5, n_bars - 0.5)
 
-    # Thin horizontal separators between model groups
-    n_per_model = len(n_bits_sorted)
-    for ax in axes.flat:
-        for i in range(len(models_sorted) - 1):
-            ax.axhline(
-                (i + 1) * n_per_model - 0.5,
-                color=divider_color, linewidth=0.5, zorder=1,
-            )
-
-    # Simplified shared legend — y-axis labels already encode model + n_bits,
-    # so individual per-precision colour patches are redundant.  Show only the
-    # two segment types; caption can note that darker shade = higher bit-width.
+    # Simplified shared legend — the column title encodes the model and the y-axis
+    # the precision, so individual per-precision colour patches are redundant. Show
+    # only the two segment types; caption can note darker shade = higher bit-width.
     legend_fs = 7
     _mid_nb = n_bits_sorted[len(n_bits_sorted) // 2]
     fit_handle     = Patch(color=fit_color, label="Fit")
@@ -1192,7 +1247,7 @@ def plot_fhe_training_breakdown_multipanel(
         columnspacing=1.0,
     )
 
-    plt.tight_layout(rect=[0, 0.08, 1, 1])
+    plt.tight_layout(rect=[0, bottom_frac, 1, 1])
 
     base_save_path = Path(save_dir) / f"fhe_training_breakdown_multipanel"
     _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
@@ -1206,10 +1261,17 @@ def plot_synth_scale_lines_multipanel(
     """
     IEEE double-column multipanel figure — synthesis-scale metric lines.
 
-    Layout: N_models rows × N_datasets columns.  Each panel plots `metric`
-    (default ROC-AUC) vs. synthesis scale, one line per synthesizer method
-    (orange lightness ramp, IQR band), with Real (green dashed) and FHE 8-bit
-    (blue dotted) horizontal reference bands.
+    Layout: N_datasets rows × N_models columns (see _grid_fig_height).  Each panel
+    plots `metric` (default ROC-AUC) vs. synthesis scale, one line per synthesizer
+    method (distinct hue, IQR band), with FHE 8-bit as a dotted reference band.
+
+    The y-axis is the DIFFERENCE from that panel's Real median, not the raw metric.
+    Every panel therefore centres on 0 regardless of how hard its dataset is, which
+    (a) makes "does more synthetic data close the gap to Real?" a direct read rather
+    than an eyeball comparison against a baseline that moves per panel, (b) lets one
+    y-scale be shared by the whole grid instead of 18 independent ones, freeing the
+    tick labels from every column but the first, and (c) collapses the Real
+    reference onto y=0, so it costs no line style of its own.
 
     Multipanel counterpart of plot_synth_scale_lines.  Two differences: synth
     method colours are computed once from the global method set (stable shade in
@@ -1252,89 +1314,92 @@ def plot_synth_scale_lines_multipanel(
 
     synth_scales = sorted(synth_all["synth_scale"].dropna().unique().astype(int))
 
-    n_row    = len(models_sorted)
-    n_col    = len(datasets)
+    n_row    = len(datasets)
+    n_col    = len(models_sorted)
     tick_fs  = 7
     label_fs = 8
 
+    fig_h       = _grid_fig_height(n_row, row_height=1.05, legend_rows=2)
+    bottom_frac = _grid_bottom_frac(fig_h, legend_rows=2)
+
     fig, axes = plt.subplots(
         n_row, n_col,
-        figsize=(_IEEE_FULL_WIDTH_IN, 5.2),
+        figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
         sharex=True,
-        sharey=False,   # independent y-scale keeps small synth-scale trends visible
+        sharey=True,    # legitimate now that every panel is a difference from Real
         squeeze=False,
     )
 
-    for row_idx, model in enumerate(models_sorted):
-        for col_idx, dataset in enumerate(datasets):
+    for row_idx, dataset in enumerate(datasets):
+        for col_idx, model in enumerate(models_sorted):
             ax     = axes[row_idx, col_idx]
             subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
 
-            synth_df = subset[subset["synth_scale"].notna()]
-            for method in synth_methods:
-                m_df = synth_df[synth_df["mode"] == method]
-                if m_df.empty:
-                    continue
-                grp = m_df.groupby("synth_scale")[metric]
-                agg = pd.DataFrame({
-                    "median": grp.median(),
-                    "q25": grp.quantile(0.25),
-                    "q75": grp.quantile(0.75),
-                }).reset_index().sort_values("synth_scale")
-                if agg.empty:
-                    continue
-                color = method_colors[method]
-                ax.plot(agg["synth_scale"], agg["median"], color=color, marker="o",
-                        linewidth=1.3, markersize=4, zorder=3)
-                ax.fill_between(agg["synth_scale"], agg["q25"], agg["q75"],
-                                color=color, alpha=0.15, zorder=1)
+            # Panel baseline: the Real median for this (dataset, model). Everything
+            # drawn below is expressed as a difference from it.
+            std_df   = subset[subset["mode"] == "standard"]
+            baseline = std_df[metric].median() if not std_df.empty else None
 
-            std_df = subset[subset["mode"] == "standard"]
-            if not std_df.empty:
-                ax.axhline(std_df[metric].median(), color=real_color,
+            if baseline is not None:
+                synth_df = subset[subset["synth_scale"].notna()]
+                for method in synth_methods:
+                    m_df = synth_df[synth_df["mode"] == method]
+                    if m_df.empty:
+                        continue
+                    grp = m_df.groupby("synth_scale")[metric]
+                    agg = pd.DataFrame({
+                        "median": grp.median(),
+                        "q25": grp.quantile(0.25),
+                        "q75": grp.quantile(0.75),
+                    }).reset_index().sort_values("synth_scale")
+                    if agg.empty:
+                        continue
+                    color = method_colors[method]
+                    ax.plot(agg["synth_scale"], agg["median"] - baseline,
+                            color=color, marker="o",
+                            linewidth=1.3, markersize=4, zorder=3)
+                    ax.fill_between(agg["synth_scale"],
+                                    agg["q25"] - baseline, agg["q75"] - baseline,
+                                    color=color, alpha=0.15, zorder=1)
+
+                # Real collapses onto y=0; its IQR keeps the band that says how much
+                # of a gap is just resampling noise.
+                ax.axhline(0.0, color=real_color,
                            linewidth=1.3, linestyle="--", zorder=5)
-                ax.axhspan(std_df[metric].quantile(0.25), std_df[metric].quantile(0.75),
+                ax.axhspan(std_df[metric].quantile(0.25) - baseline,
+                           std_df[metric].quantile(0.75) - baseline,
                            color=real_color, alpha=0.10, zorder=0)
 
-            fhe_df = subset[(subset["mode"] == "fhe") & (subset["n_bits"] == 8)]
-            if not fhe_df.empty:
-                ax.axhline(fhe_df[metric].median(), color=fhe_color,
-                           linewidth=1.3, linestyle=":", zorder=5)
-                ax.axhspan(fhe_df[metric].quantile(0.25), fhe_df[metric].quantile(0.75),
-                           color=fhe_color, alpha=0.10, zorder=0)
+                fhe_df = subset[(subset["mode"] == "fhe") & (subset["n_bits"] == 8)]
+                if not fhe_df.empty:
+                    ax.axhline(fhe_df[metric].median() - baseline, color=fhe_color,
+                               linewidth=1.3, linestyle=":", zorder=5)
+                    ax.axhspan(fhe_df[metric].quantile(0.25) - baseline,
+                               fhe_df[metric].quantile(0.75) - baseline,
+                               color=fhe_color, alpha=0.10, zorder=0)
 
             if synth_scales:
-                # Show at most 3 evenly-spaced tick labels (first, middle, last) so
-                # the narrow IEEE-width panels don't crowd with "%" labels.
-                if len(synth_scales) <= 3:
-                    label_scales = set(synth_scales)
-                else:
-                    label_scales = {
-                        synth_scales[0],
-                        synth_scales[len(synth_scales) // 2],
-                        synth_scales[-1],
-                    }
+                # Every scale can carry a label at the transposed panel width; the
+                # "%" is dropped because the shared x-axis label already states it.
                 ax.set_xticks(synth_scales)
-                ax.set_xticklabels(
-                    [f"{s}%" if s in label_scales else "" for s in synth_scales]
-                )
+                ax.set_xticklabels([str(s) for s in synth_scales])
             ax.tick_params(labelsize=tick_fs, length=3, pad=2)
             sns.despine(ax=ax)
 
             if row_idx == 0:
-                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+                ax.set_title(_abbrev_model(model), fontsize=label_fs, pad=4)
             if row_idx == n_row - 1:
                 ax.set_xlabel("Synthesis Scale (%)", fontsize=label_fs, labelpad=3)
             if col_idx == 0:
-                ylabel = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
-                ax.set_ylabel(ylabel, fontsize=label_fs, labelpad=3)
-                # Model row label — far left, rotated, since (a)/(b) occupies the corner
-                ax.text(-0.48, 0.5, _abbrev_model(model),
-                        transform=ax.transAxes, rotation=90,
-                        fontsize=label_fs, fontweight="bold",
-                        va="center", ha="center")
+                ax.set_ylabel(_dataset_row_label(dataset), fontsize=label_fs,
+                              labelpad=3)
 
-            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs)
+            _add_panel_label(ax, row_idx * n_col + col_idx, fontsize=label_fs, x=0.0)
+
+    # The per-row y-axis now names the dataset, so the quantity it measures is
+    # stated once for the whole grid.
+    metric_label = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
+    fig.supylabel(f"Δ {metric_label} (vs. Real)", fontsize=label_fs, x=0.012)
 
     # Shared bottom legend — long method labels wrap onto two rows (ncol=4)
     legend_fs = 7
@@ -1345,7 +1410,7 @@ def plot_synth_scale_lines_multipanel(
         for m in synth_methods
     ]
     handles.append(Line2D([0], [0], color=real_color, linewidth=1.3,
-                          linestyle="--", label="Real"))
+                          linestyle="--", label="Real (Δ = 0)"))
     handles.append(Line2D([0], [0], color=fhe_color, linewidth=1.3,
                           linestyle=":", label="FHE 8-bit"))
     fig.legend(
@@ -1359,7 +1424,8 @@ def plot_synth_scale_lines_multipanel(
         columnspacing=1.2,
     )
 
-    plt.tight_layout(rect=[0, 0.10, 1, 1])
+    # Left inset reserves the strip the shared y-label sits in.
+    plt.tight_layout(rect=[0.028, bottom_frac, 1, 1])
 
     base_save_path = Path(save_dir) / f"synth_scale_lines_{metric}_multipanel"
     _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
@@ -1596,6 +1662,26 @@ PREDICTIONS_DIR = Path("results/predictions")
 
 _ROC_FPR_GRID = np.linspace(0.0, 1.0, 201)
 
+# Axes window for the ROC panels as (fpr_min, fpr_max, tpr_min, tpr_max), or None
+# for the full unit square. These classifiers sit at AUC ~0.8-0.99, so the curves
+# crowd into the upper-left corner and most of the unit square is empty; cropping
+# to that corner quadruples the effective resolution at unchanged panel size. The
+# chance diagonal y=x meets a cropped window only at its lower-right corner point,
+# so it stops earning a legend entry once a zoom is in effect.
+_ROC_ZOOM_DEFAULT = (0.0, 0.5, 0.5, 1.0)
+
+# Panel height / width for the ROC panels; None lets them fill their grid slot.
+# A square panel at the transposed width (~1.8 in) would need ~14 in of height for
+# six dataset rows, and the hardcoded figure height that used to pair with
+# set_box_aspect(1) left a dead vertical band once the grid stopped being 3 rows.
+_ROC_BOX_ASPECT = None
+
+
+def _roc_zoom(cfg):
+    """(fpr_min, fpr_max, tpr_min, tpr_max) for the ROC panels, or None for full."""
+    raw = cfg.get("roc", {}).get("zoom", _ROC_ZOOM_DEFAULT)
+    return None if raw is None else tuple(float(v) for v in raw)
+
 
 def load_predictions(predictions_dir=PREDICTIONS_DIR, split="test"):
     """
@@ -1688,13 +1774,15 @@ def _fmt_auc(auc):
 
 
 def _draw_roc_panel(ax, curves, fpr_grid, band_labels, annotate_labels,
-                    n_boot, seed, auc_fontsize=6):
+                    n_boot, seed, auc_fontsize=6, zoom=None):
     """
     Render one ROC panel.
 
     curves : ordered list of dicts {label, short, color, linestyle, y_true, y_proba}.
     band_labels     : labels that get a shaded 95% TPR bootstrap band.
     annotate_labels : labels whose AUC is printed in the lower-right block.
+    zoom            : axes window, see _roc_zoom. The AUC block stays in the panel's
+                      lower-right, which is empty under either window.
     """
     # Chance diagonal first so curves sit on top.
     ax.plot([0, 1], [0, 1], color="#9a9a9a", linestyle=(0, (1, 1)),
@@ -1730,17 +1818,20 @@ def _draw_roc_panel(ax, curves, fpr_grid, band_labels, annotate_labels,
                 transform=ax.transAxes, ha="right", va="bottom",
                 fontsize=auc_fontsize, color=color, zorder=4)
 
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.set_box_aspect(1)
-    ax.set_xticks([0, 0.5, 1])
-    ax.set_yticks([0, 0.5, 1])
+    x0, x1, y0, y1 = zoom if zoom else (0.0, 1.0, 0.0, 1.0)
+    ax.set_xlim(x0, x1)
+    ax.set_ylim(y0, y1)
+    if _ROC_BOX_ASPECT is not None:
+        ax.set_box_aspect(_ROC_BOX_ASPECT)
+    ax.set_xticks(np.linspace(x0, x1, 3))
+    ax.set_yticks(np.linspace(y0, y1, 3))
 
 
 def _roc_grid_figure(preds, cfg, *, panel_curves, band_labels, annotate_labels,
                      legend_handles, save_name, save_dir=FIGURES_DIR, legend_ncol=None):
     """
-    Shared 3-model x N-dataset ROC multipanel scaffold.
+    Shared N-dataset x N-model ROC multipanel scaffold (datasets on rows, see
+    _grid_fig_height).
 
     panel_curves(preds, dataset, model, cfg) -> ordered list of curve dicts for a panel.
     legend_handles : list of Line2D for the shared bottom legend.
@@ -1759,45 +1850,49 @@ def _roc_grid_figure(preds, cfg, *, panel_curves, band_labels, annotate_labels,
         return
 
     n_boot, seed = _bootstrap_settings()
-    n_row, n_col = len(models), len(datasets)
+    n_row, n_col = len(datasets), len(models)
     tick_fs, label_fs = 7, 8
+    zoom = _roc_zoom(cfg)
+
+    if legend_ncol is None:
+        legend_ncol = min(len(legend_handles), 6)
+    legend_rows = math.ceil(len(legend_handles) / legend_ncol)
+
+    fig_h       = _grid_fig_height(n_row, row_height=1.30, legend_rows=legend_rows)
+    bottom_frac = _grid_bottom_frac(fig_h, legend_rows=legend_rows)
 
     fig, axes = plt.subplots(
         n_row, n_col,
-        figsize=(_IEEE_FULL_WIDTH_IN, 5.2),
+        figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
+        sharex=True, sharey=True,   # every panel shows the identical ROC window
         squeeze=False,
     )
 
-    for r, model in enumerate(models):
-        for c, dataset in enumerate(datasets):
+    for r, dataset in enumerate(datasets):
+        for c, model in enumerate(models):
             ax = axes[r, c]
             curves = panel_curves(preds, dataset, model, cfg)
             if curves:
                 _draw_roc_panel(ax, curves, _ROC_FPR_GRID, band_labels,
-                                annotate_labels, n_boot, seed)
+                                annotate_labels, n_boot, seed, zoom=zoom)
 
             ax.tick_params(labelsize=tick_fs, length=3, pad=2,
                            labelbottom=(r == n_row - 1), labelleft=(c == 0))
             sns.despine(ax=ax)
 
             if r == 0:
-                ax.set_title(_fmt_dataset(dataset), fontsize=label_fs, pad=4)
+                ax.set_title(_abbrev_model(model), fontsize=label_fs, pad=4)
             if r == n_row - 1:
                 ax.set_xlabel("False Positive Rate", fontsize=label_fs, labelpad=3)
             if c == 0:
-                ax.set_ylabel("True Positive Rate", fontsize=label_fs, labelpad=3)
-                # Model row label — far left, rotated (the (a)/(b) tag takes the corner).
-                ax.text(-0.42, 0.5, _abbrev_model(model),
-                        transform=ax.transAxes, rotation=90,
-                        fontsize=label_fs, fontweight="bold",
-                        va="center", ha="center")
+                ax.set_ylabel(_dataset_row_label(dataset), fontsize=label_fs,
+                              labelpad=3)
 
-            _add_panel_label(ax, r * n_col + c, fontsize=label_fs)
+            _add_panel_label(ax, r * n_col + c, fontsize=label_fs, x=0.0)
 
-    if legend_ncol is None:
-        legend_ncol = min(len(legend_handles), 6)
-    legend_rows = math.ceil(len(legend_handles) / legend_ncol)
-    bottom_frac = 0.06 + 0.035 * legend_rows
+    # The per-row y-axis now names the dataset, so the quantity it measures is
+    # stated once for the whole grid.
+    fig.supylabel("True Positive Rate", fontsize=label_fs, x=0.012)
 
     fig.legend(
         handles=legend_handles,
@@ -1809,7 +1904,8 @@ def _roc_grid_figure(preds, cfg, *, panel_curves, band_labels, annotate_labels,
         handletextpad=0.4,
         columnspacing=1.2,
     )
-    plt.tight_layout(rect=[0, bottom_frac, 1, 1])
+    # Left inset reserves the strip the shared y-label sits in.
+    plt.tight_layout(rect=[0.028, bottom_frac, 1, 1])
 
     base_save_path = Path(save_dir) / save_name
     _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
@@ -1820,7 +1916,7 @@ def plot_roc_primary_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
                                 viz_cfg_path="config/visualization.yaml"):
     """
     Primary-RQ ROC figure: Real vs best synthetic generator (ARF, scale 100) vs
-    FHE 8-bit, one panel per (model, dataset), each curve with a 95% TPR band.
+    FHE 8-bit, one panel per (dataset, model), each curve with a 95% TPR band.
     Saved as: roc_curves_primary_multipanel.{fmt}
     """
     from matplotlib.lines import Line2D
@@ -1858,9 +1954,14 @@ def plot_roc_primary_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
                linewidth=1.3, label="ARF (best generator)"),
         Line2D([0], [0], color=fhe_color, linestyle=(0, (3, 1, 1, 1)),
                linewidth=1.3, label="FHE 8-bit"),
-        Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
-               linewidth=1.0, label="Chance"),
     ]
+    # The chance diagonal falls outside a cropped ROC window, so it only earns a
+    # legend entry when the panels show the full unit square.
+    if _roc_zoom(cfg) is None:
+        legend_handles.append(
+            Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
+                   linewidth=1.0, label="Chance")
+        )
 
     _roc_grid_figure(
         preds, cfg,
@@ -1877,7 +1978,7 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
                                       viz_cfg_path="config/visualization.yaml"):
     """
     RQ2 ROC figure: Real baseline plus FHE at every bit-width (2..12, shaded
-    light->dark by precision), one panel per (model, dataset). Only the Real
+    light->dark by precision), one panel per (dataset, model). Only the Real
     reference carries a 95% TPR band — an FHE curve entering that band is
     statistically indistinguishable from the baseline, while seven overlapping
     bands would be unreadable.
@@ -1931,10 +2032,11 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
                label=f"FHE {nb}-bit")
         for nb in fhe_bits
     ]
-    legend_handles.append(
-        Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
-               linewidth=1.0, label="Chance")
-    )
+    if _roc_zoom(cfg) is None:
+        legend_handles.append(
+            Line2D([0], [0], color="#9a9a9a", linestyle=(0, (1, 1)),
+                   linewidth=1.0, label="Chance")
+        )
 
     _roc_grid_figure(
         preds, cfg,

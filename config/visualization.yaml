@@ -140,6 +140,14 @@ metrics:
 log_scale_metrics:
   - inf_time_per_sample
 
+# ROC multipanel axes window. These classifiers sit at ROC-AUC ~0.8-0.99, so the
+# curves crowd into the upper-left corner and most of the unit square is empty;
+# cropping to that corner quadruples effective resolution at unchanged panel size.
+# Set `zoom: null` to restore the full unit square (which also restores the chance
+# diagonal to the legend — y=x does not cross a cropped window).
+roc:
+  zoom: [0.0, 0.5, 0.5, 1.0]   # [fpr_min, fpr_max, tpr_min, tpr_max]
+
 # Radar overview figure — one polar panel per mode, aggregated over all
 # datasets x models. Performance axes fill the TOP half (absolute [0,1] band);
 # resource-cost axes fill the BOTTOM half (log + min-max across the shown modes,
