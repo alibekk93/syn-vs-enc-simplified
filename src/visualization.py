@@ -17,6 +17,10 @@ FIGURES_DIR = Path("results/figures")
 BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
 STATS_DIR = Path("results/stats")
 
+# Fallback for config/visualization.yaml `significance.levels`, so a config
+# predating that block still renders markers.
+_DEFAULT_SIG_LEVELS = {"***": 0.001, "**": 0.01, "*": 0.05}
+
 
 # ===========================================================
 # DATA LOADING
@@ -1362,32 +1366,49 @@ def plot_synth_scale_lines_multipanel(
     plt.close()
 
 
-def _mark_significant(ax, sorted_keys, marked, fontsize=8):
-    """
-    Draw one "*" above every violin in `marked`, at a constant height so the
-    markers read as a scannable row rather than tracking each violin's top.
+def _significance_marker(p, levels):
+    """Strictest tier `p` clears, or None if it clears none."""
+    for marker, bound in sorted(levels.items(), key=lambda kv: kv[1]):
+        if p < bound:
+            return marker
+    return None
 
-    A single symbol, not the */**/*** ladder: the paired bootstrap p is floored
-    at about 1/(B+1), so tiers below that would imply a resolution the statistic
-    does not have.
+
+def _mark_significant(ax, sorted_keys, marked, levels=None, fontsize=8):
+    """
+    Draw a significance marker above every violin in `marked`, at a constant
+    height so the markers read as a scannable row rather than tracking each
+    violin's top.
+
+    `marked` maps mode_key -> Holm-corrected p; `levels` maps marker -> upper
+    bound (config/visualization.yaml `significance.levels`).
     """
     if not marked:
         return
 
-    y0, y1 = ax.get_ylim()
-    ax.set_ylim(y0, y1 + 0.12 * (y1 - y0))   # headroom so markers clear the violins
+    levels = levels or _DEFAULT_SIG_LEVELS
+    tiers = [(xi, _significance_marker(marked[k], levels))
+             for xi, k in enumerate(sorted_keys) if k in marked]
+    tiers = [(xi, m) for xi, m in tiers if m]
+    if not tiers:
+        return
 
-    for xi, key in enumerate(sorted_keys):
-        if key in marked:
-            ax.annotate("*", xy=(xi, 0.93), xycoords=("data", "axes fraction"),
-                        ha="center", va="center", fontsize=fontsize + 2,
-                        annotation_clip=False)
+    # Headroom so the markers clear the violins. "***" is no taller than "*",
+    # but the extra room keeps a three-glyph marker off the panel label.
+    y0, y1 = ax.get_ylim()
+    ax.set_ylim(y0, y1 + 0.15 * (y1 - y0))
+
+    for xi, marker in tiers:
+        ax.annotate(marker, xy=(xi, 0.93), xycoords=("data", "axes fraction"),
+                    ha="center", va="center", fontsize=fontsize + 2,
+                    annotation_clip=False)
 
 
 @lru_cache(maxsize=None)
 def _significant_vs_real(metric: str, stats_dir: str = str(STATS_DIR)) -> dict:
     """
-    Map (dataset, model) -> frozenset of mode_keys significantly worse than Real.
+    Map (dataset, model) -> {mode_key: p_holm} for modes significantly worse
+    than Real.
 
     Reads every results/stats/*.csv and keeps only reference-design rows whose
     reference is `standard`, i.e. analyses A1 (each generator vs real) and A2
@@ -1401,7 +1422,8 @@ def _significant_vs_real(metric: str, stats_dir: str = str(STATS_DIR)) -> dict:
     marked: dict = {}
     for path in sorted(Path(stats_dir).glob("*.csv")):
         df = pd.read_csv(path)
-        if df.empty or not {"mode_a", "mode_b", "significant_holm"} <= set(df.columns):
+        if df.empty or not {"mode_a", "mode_b", "significant_holm",
+                            "p_holm"} <= set(df.columns):
             continue
 
         # significant_holm arrives as bool from a populated file but as the
@@ -1418,10 +1440,14 @@ def _significant_vs_real(metric: str, stats_dir: str = str(STATS_DIR)) -> dict:
             # contrast against some other scale must not mark that violin.
             if meta["synth_scale"] not in (None, 100):
                 continue
-            key = (row.dataset, row.model)
-            marked.setdefault(key, set()).add(_raw_mode_key(meta["mode"], meta["n_bits"]))
+            cell = marked.setdefault((row.dataset, row.model), {})
+            mode_key = _raw_mode_key(meta["mode"], meta["n_bits"])
+            # A contrast should appear in exactly one file, but a stale table
+            # left in results/stats/ can duplicate it. Keep the weaker p so a
+            # leftover file cannot silently promote a mode to a higher tier.
+            cell[mode_key] = max(cell.get(mode_key, 0.0), float(row.p_holm))
 
-    return {k: frozenset(v) for k, v in marked.items()}
+    return marked
 
 
 def plot_violinplot_multipanel(
@@ -1445,10 +1471,14 @@ def plot_violinplot_multipanel(
     each synthesizer contributes a single violin (matches how the single-panel violins
     are generated). Saved as: violinplot_{metric}_multipanel__{dataset}.{fmt}
 
-    Violins carrying "*" are significantly WORSE than Real, one-sided and
+    Marked violins are significantly WORSE than Real, one-sided and
     Holm-corrected, read from results/stats/ (run the tests first, see
-    jobs/run_azure_analysis.sh). Note for the caption: the markers come from two
-    separate Holm families, the generators and the bit widths, and an unmarked
+    jobs/run_azure_analysis.sh). Tiers come from config/visualization.yaml
+    `significance.levels`, by default * p<0.05, ** p<0.01, *** p<0.001 on the
+    Holm-corrected p.
+
+    For the caption: the markers span two separate Holm families, the generators
+    (A1) and the bit widths (A2), so state both family sizes; and an unmarked
     violin means "not significantly worse", not "equivalent".
     """
     if cfg is None:
@@ -1489,9 +1519,10 @@ def plot_violinplot_multipanel(
     tick_fs   = 7
     label_fs  = 8
 
-    # Significance markers: one symbol per mode that is significantly WORSE than
-    # Real. Absent tests leave this empty and the panels render unannotated.
+    # Significance markers: a tiered symbol per mode that is significantly WORSE
+    # than Real. Absent tests leave this empty and the panels render unannotated.
     significant = _significant_vs_real(metric)
+    sig_levels  = cfg.get("significance", {}).get("levels") or _DEFAULT_SIG_LEVELS
     fmt       = fig_cfg["format"]
     ylabel    = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
 
@@ -1522,8 +1553,8 @@ def plot_violinplot_multipanel(
                 _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg,
                                        show_strip=False)
                 _add_group_separators(ax, order, label_group_map, cfg, show_labels=False)
-                _mark_significant(ax, sorted_keys, significant.get((dataset, model), ()),
-                                  fontsize=label_fs)
+                _mark_significant(ax, sorted_keys, significant.get((dataset, model), {}),
+                                  levels=sig_levels, fontsize=label_fs)
 
             ax.set_xlim(-0.5, n_mode - 0.5)
             ax.set_xlabel("")
