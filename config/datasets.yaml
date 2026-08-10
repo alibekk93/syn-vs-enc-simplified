@@ -86,21 +86,21 @@ maternal_health_risk:
 
 # The undeclared `Case Number` row identifier is dropped at load time — see the
 # note in src/dataset.py load().
-gestational_diabetes:
-  features: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sys BP, Dia BP, OGTT, Hemoglobin, Sedentary Lifestyle, Prediabetes]
-  target: Class Label(GDM /Non GDM)
-  preprocessing:
-    binarize_target:
-      enabled: false
-      threshold: null
-    numeric:
-      columns: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Sys BP, Dia BP, OGTT, Hemoglobin]
-      steps:
-        - impute_median
-        - standard_scale
-    categorical:
-      columns: [Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sedentary Lifestyle, Prediabetes]
-      steps: [impute_mode]
+# gestational_diabetes:
+#   features: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sys BP, Dia BP, OGTT, Hemoglobin, Sedentary Lifestyle, Prediabetes]
+#   target: Class Label(GDM /Non GDM)
+#   preprocessing:
+#     binarize_target:
+#       enabled: false
+#       threshold: null
+#     numeric:
+#       columns: [Age, No of Pregnancy, Gestation in previous Pregnancy, BMI, HDL, Sys BP, Dia BP, OGTT, Hemoglobin]
+#       steps:
+#         - impute_median
+#         - standard_scale
+#     categorical:
+#       columns: [Family History, unexplained prenetal loss, Large Child or Birth Default, PCOS, Sedentary Lifestyle, Prediabetes]
+#       steps: [impute_mode]
 
 # `CLASS` (the 10-level morphologic pattern) is deliberately absent from `features`:
 # it is a second label for the same recording and is dropped at load time. Keeping
