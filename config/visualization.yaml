@@ -5,14 +5,19 @@
 figures:
   dir: results/figures
   format: svg
-  # Target on-page width, in inches, for figures placed at \textwidth. The Overleaf
+  # Canvas width, in inches, for the figures placed at \textwidth. The Overleaf
   # document is elsarticle[preprint,12pt] on A4 with no geometry package, so
   # \the\textwidth is 390pt = 5.40in (measured; see
-  # tmp/overleaf/figures/conceptual_overview/README.md). Generating at exactly this
-  # width means \includegraphics[width=\textwidth] renders at 1:1 and the point sizes
-  # below are the point sizes that reach the page. Change this one number if the page
-  # geometry changes (e.g. adding \usepackage[margin=1in]{geometry} -> 6.5).
-  page_width_in: 5.40
+  # tmp/overleaf/figures/conceptual_overview/README.md).
+  #
+  # This is deliberately 25% WIDER than that (5.40 * 1.25), so a figure placed at
+  # \includegraphics[width=\linewidth] is scaled to 0.8 on the page. Everything
+  # shrinks by that factor together, which trades text size for drawing area: the
+  # point sizes below land at 0.8x on the page (8pt ticks -> 6.4pt, still clear of the
+  # 6pt floor), and in exchange the twelve-mode axis gets a quarter more room, so the
+  # violins and the FHE-10/FHE-12 tick labels stop crowding. Set this to 5.40 to go
+  # back to 1:1 rendering at full point size.
+  page_width_in: 6.75
 
 # seaborn style / context — controls overall look and element scaling
 # style:   white | whitegrid | ticks | darkgrid

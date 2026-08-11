@@ -1003,14 +1003,16 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
 
 _IEEE_FULL_WIDTH_IN = 7.16
 
-# Target width for figures placed at \textwidth in the manuscript. The Overleaf
+# Canvas width for figures placed at \textwidth in the manuscript. The Overleaf
 # document is elsarticle[preprint,12pt] on A4 with no geometry package, so
-# \the\textwidth is 390pt = 5.40in. Generating at IEEE width instead and then placing
-# at 0.47\textwidth rendered these figures at 0.36x, which dragged 7pt tick labels
-# down to ~2.5pt on the page — under any journal's 6pt floor. Generating at exactly
-# the on-page width means the point sizes set below are the point sizes that print.
-# Overridable via `figures.page_width_in` so a change of page geometry is one number.
-_PAGE_WIDTH_IN = 5.40
+# \the\textwidth is 390pt = 5.40in. The old IEEE-width canvas placed at 0.47\textwidth
+# rendered at 0.36x, dragging 7pt tick labels to ~2.5pt on the page, under any
+# journal's 6pt floor.
+#
+# This is 25% wider than the text block (5.40 * 1.25), so placing at \linewidth scales
+# the figure to 0.8: the point sizes below print at 0.8x (8pt -> 6.4pt) and the twelve
+# mode slots get a quarter more room. Set `figures.page_width_in` to 5.40 for 1:1.
+_PAGE_WIDTH_IN = 6.75
 
 
 def _page_width_in(cfg):
@@ -1106,7 +1108,7 @@ _GRID_CHROME_IN = 1.05        # column titles + bottom axis label + x tick label
 # datasets per float page. Panel height is the knob to turn once a compiled page has
 # actually been looked at.
 _VIOLIN_PANEL_H_IN = 0.95     # drawn height of one model panel
-_VIOLIN_TOP_IN     = 0.20     # "(a) LR" tag above the top panel
+_VIOLIN_TOP_IN     = 0.38     # dataset header, then the "(a) LR" tag above the top panel
 _VIOLIN_BOTTOM_IN  = 0.52     # mode codes, then the group names under them
 _VIOLIN_HSPACE     = 0.22     # inter-panel gap, as a fraction of panel height
 # Group names go BELOW the mode codes, as the second level of a two-level axis. The
@@ -1725,13 +1727,12 @@ def plot_violinplot_multipanel(
     Violins only (no strip dots).
 
     Geometry: the figure is emitted at exactly `figures.page_width_in` and saved with
-    no tight bounding box, so the PDF media box is that width and
-    \\includegraphics[width=\\textwidth] renders it at 1:1. That is what makes the point
-    sizes below the point sizes that actually print — do not reintroduce
-    bbox_inches="tight" here, which trims to an unpredictable width and silently
-    rescales all the type. Panel height is `_VIOLIN_PANEL_H_IN`; the intent is that
-    two datasets fit on one float page, so that is the number to tune after looking at
-    a compiled page.
+    no tight bounding box, so the PDF media box is that width and the on-page scale is
+    a known constant rather than whatever a tight bbox happened to trim to. Do not
+    reintroduce bbox_inches="tight" here — it silently rescales all the type. The
+    canvas is wider than the text block on purpose (see `page_width_in`), so the point
+    sizes below print reduced by that ratio. Panel height is `_VIOLIN_PANEL_H_IN`,
+    the number to tune after looking at a compiled page.
 
     Each panel is drawn on one shared y-limit per dataset, computed across all three
     models with the significance headroom reserved unconditionally, so the panels of a
@@ -1742,9 +1743,8 @@ def plot_violinplot_multipanel(
     since the full names overlap at page width. Mode colours/order are computed once
     from the global mode set, so every dataset file is directly comparable.
 
-    The dataset name is deliberately NOT drawn: these are placed as subfigures whose
-    LaTeX subcaption already names the dataset, and dropping the in-figure title buys
-    back the vertical space that gets two datasets onto a page.
+    Each file carries its dataset name as a header, so it identifies itself wherever it
+    is placed and the LaTeX side needs no sub-caption to name it.
 
     Canonical scale-100 view: synthesizer rows are filtered to synth_scale == 100 so
     each synthesizer contributes a single violin (matches how the single-panel violins
@@ -1796,7 +1796,7 @@ def plot_violinplot_multipanel(
     n_model   = len(models_sorted)
     n_mode    = len(order)
     font_cfg  = cfg["fonts"]
-    # True printed point sizes: the figure renders 1:1 at \textwidth (see docstring).
+    # Canvas point sizes. They print reduced by textwidth/page_width_in (see docstring).
     tick_fs   = font_cfg.get("panel_tick_size", 8)
     label_fs  = font_cfg.get("panel_label_size", 9)
     fig_w     = _page_width_in(cfg)
@@ -1834,10 +1834,13 @@ def plot_violinplot_multipanel(
             squeeze=False,
         )
         # Reserve margins in absolute inches (predictable without a local render):
-        # left = y-ticks + supylabel, top = group band labels, bottom = mode codes.
+        # left = y-ticks + supylabel, top = header + "(a) LR" tag, bottom = mode codes
+        # over the group names.
+        left_frac  = 0.66 / fig_w
+        right_frac = 1 - 0.10 / fig_w   # half of the "FHE-12" tick label overhangs
         fig.subplots_adjust(
-            left=0.66 / fig_w,
-            right=1 - 0.10 / fig_w,     # half of the "FHE-12" tick label overhangs
+            left=left_frac,
+            right=right_frac,
             top=1 - _VIOLIN_TOP_IN / fig_h,
             bottom=_VIOLIN_BOTTOM_IN / fig_h,
         )
@@ -1884,7 +1887,14 @@ def plot_violinplot_multipanel(
             else:
                 ax.tick_params(labelbottom=False)
 
-        # No dataset title: the LaTeX subcaption already names it (see docstring).
+        # Dataset header, centred over the axes rather than the canvas (the left
+        # margin is much wider than the right, so figure-centred would read as offset).
+        fig.suptitle(
+            _fmt_dataset(dataset),
+            x=(left_frac + right_frac) / 2,
+            y=1 - 0.04 / fig_h, va="top",
+            fontsize=label_fs + 1, fontweight="bold",
+        )
         fig.supylabel(ylabel, fontsize=label_fs, x=0.012)   # shared y-axis label
 
         # No bbox_inches="tight" here — the media box must stay exactly fig_w wide so
