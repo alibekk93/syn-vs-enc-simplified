@@ -151,12 +151,16 @@ roc:
 # Radar overview figure — one polar panel per mode, aggregated over all
 # datasets x models. Performance axes fill the TOP half (absolute [0,1] band);
 # resource-cost axes fill the BOTTOM half (log + min-max across the shown modes,
-# inverted) so "outward = better" on every axis. The split is carried by axis order
-# and the caption; the panel background is plain.
+# inverted) so "outward = better" on every axis. The two group hues wash the two
+# halves and are drawn from the Okabe-Ito palette, validated colorblind-safe (blue vs
+# vermilion: CVD dE >= 21, both >= 3:1 contrast on white). The wash is skipped when
+# `envelope: true`, where it would stack with the band into mud.
 radar:
+  perf_color: "#0072b2"        # performance group (Okabe-Ito blue)
+  resource_color: "#d55e00"    # resource group (Okabe-Ito vermilion)
   poly_color: "#2b2b2b"        # per-mode polygon/band — neutral, identical every panel
   baseline_color: "#8a8a8a"    # Real reference polygon (dashed, non-Real panels)
-  grid_color: "#cfcfcf"        # hairline rings and spokes
+  grid_color: "#cfcfcf"        # hairline rings, and spokes when the wash is off
   # Performance-axis normalization:
   #   minmax   -> per-axis min-max across the shown modes (lowest=0, highest=1)
   #   absolute -> map raw metric through perf_band (true magnitude, stable)

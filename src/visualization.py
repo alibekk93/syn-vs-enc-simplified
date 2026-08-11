@@ -2070,10 +2070,12 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 # fair visual summary. Exact values live in the manuscript tables; the radar's
 # job is the shape/signature comparison across modes.
 #
-# The panel background is plain: hairline rings and spokes in one grey, no group
-# colour coding. Naming the halves is the caption's job, and the axis order already
-# keeps them contiguous. The mode's ink is a neutral slate, identical on every panel
-# — the panel title names the mode, so it spends no colour at all.
+# Colour does exactly one job here: group identity (performance vs resource), carried
+# redundantly by a wedge wash + coloured spokes (never by the axis text). The mode's
+# ink is a neutral slate, identical on every panel — the panel title names the mode,
+# so it spends no colour and cannot collide with the group hues. The wash is dropped
+# when `radar.envelope` is on, where wash + band stack into mud; those panels get a
+# plain grey grid and lean on axis order alone to separate the halves.
 #
 # `radar.envelope` in config/visualization.yaml picks how each mode is drawn — one
 # figure per run either way, so flip it and re-run to compare:
@@ -2112,6 +2114,8 @@ _RADAR_AXES = [
 _RADAR_ANGLES_DEG = [10, 50, 90, 130, 170, 210, 250, 290, 330]
 
 _RADAR_DEFAULTS = {
+    "perf_color": "#0072b2",
+    "resource_color": "#d55e00",
     "poly_color": "#2b2b2b",
     "baseline_color": "#8a8a8a",
     "grid_color": "#cfcfcf",
@@ -2349,13 +2353,40 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles, values_band=No
     ax.spines["polar"].set_visible(False)
     ax.set_facecolor("none")
 
-    # plain hairline grid: concentric rings + one spoke per axis. The performance /
-    # resource split is carried by the axis order and the caption, not by colour.
+    # concentric hairline gridlines
     circ = np.linspace(0, 2 * np.pi, 240)
     for r in (0.25, 0.5, 0.75, 1.0):
         ax.plot(circ, np.full_like(circ, r), color=grid_c, lw=0.6, zorder=1)
-    for ang in angles:
-        ax.plot([ang, ang], [0, 1], color=grid_c, lw=0.6, zorder=1)
+
+    # Group wedge washes + spokes coloured by group, spanning each group's actual
+    # angular extent (padded by half a step on each side) so the wash follows the
+    # group even though the axes are spaced evenly around the whole circle. Drawn as
+    # explicit wedges (centre -> rim -> arc -> rim -> centre) for version-stable
+    # rendering. Only for the mean variant: under a shaded band these stack into mud,
+    # so the envelope panels keep a plain grey grid instead.
+    if values_band is None:
+        perf_c, res_c = rcfg["perf_color"], rcfg["resource_color"]
+        half_step = np.pi / len(angles)   # = (2*pi / n) / 2
+
+        def _wash(a0, a1, color):
+            t = np.linspace(a0, a1, 160)
+            ax.fill(np.concatenate([[a0], t, [a1]]),
+                    np.concatenate([[0.0], np.ones_like(t), [0.0]]),
+                    color=color, alpha=0.06, linewidth=0, zorder=0)
+
+        perf_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "perf"]
+        res_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "resource"]
+        if perf_ang:
+            _wash(perf_ang[0] - half_step, perf_ang[-1] + half_step, perf_c)
+        if res_ang:
+            _wash(res_ang[0] - half_step, res_ang[-1] + half_step, res_c)
+
+        for ang, (_col, _short, group) in zip(angles, _RADAR_AXES):
+            spoke_c = perf_c if group == "perf" else res_c
+            ax.plot([ang, ang], [0, 1], color=spoke_c, lw=0.7, alpha=0.45, zorder=1)
+    else:
+        for ang in angles:
+            ax.plot([ang, ang], [0, 1], color=grid_c, lw=0.6, zorder=1)
 
     # axis short-codes, anchored outward from the rim with angle-based alignment so
     # a label never straddles the ring, crowds the panel title, or spills onto a
