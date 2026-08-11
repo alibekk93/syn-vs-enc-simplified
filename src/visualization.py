@@ -2059,9 +2059,9 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 # ===========================================================
 #
 # One polar panel per mode (Real / synthesizers at scale=100 / FHE at a chosen
-# bit-width), each aggregating over all datasets x models. The 10 axes split into
+# bit-width), each aggregating over all datasets x models. The 9 axes split into
 # two contiguous half-circles so the grouping the reader must make is done for
-# them by geometry + colour:
+# them by geometry:
 #   - Performance (top half)   : native [0,1] metrics, mapped to an absolute band
 #                                [0.5, 1.0] -> [centre, rim]. Outward = higher.
 #   - Resource cost (bottom)   : log10 + min-max across the shown modes, INVERTED,
@@ -2070,10 +2070,25 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 # fair visual summary. Exact values live in the manuscript tables; the radar's
 # job is the shape/signature comparison across modes.
 #
-# Colour does exactly one job here: group identity (performance vs resource),
-# carried redundantly by a wedge wash + coloured spokes (never by the axis text).
-# The polygon is a neutral slate, identical on every panel — the panel title names
-# the mode, so the polygon spends no colour and cannot collide with the group hues.
+# The panel background is plain: hairline rings and spokes in one grey, no group
+# colour coding. Naming the halves is the caption's job, and the axis order already
+# keeps them contiguous. The mode's ink is a neutral slate, identical on every panel
+# — the panel title names the mode, so it spends no colour at all.
+#
+# `radar.envelope` in config/visualization.yaml picks how each mode is drawn — one
+# figure per run either way, so flip it and re-run to compare:
+#   - false (default) : one polygon per mode, the mean over (dataset x model) cells,
+#                       with short IQR whiskers at each vertex.
+#   - true            : that polygon replaced by a shaded p25-p75 band over those
+#                       cells (no centre line), exposing how much the cells disagree.
+# Real stays a single dashed mean in both. The envelope carries two caveats, both of
+# which belong in the caption:
+#   (a) the band is a PER-AXIS quantile, so neither edge is a real (dataset, model)
+#       combination — it is an envelope, not a case;
+#   (b) radii are NOT comparable with the mean version. Both use the same normalisers,
+#       but the mean version fits their ranges to the mode means and the envelope to
+#       the quantiles it draws, which overshoot those means by 4-32% on the resource
+#       axes.
 
 # (column, short code, group) ordered by increasing display angle so the 5
 # performance axes fill the top semicircle (ROC-AUC at top centre) and the 4
@@ -2097,8 +2112,6 @@ _RADAR_AXES = [
 _RADAR_ANGLES_DEG = [10, 50, 90, 130, 170, 210, 250, 290, 330]
 
 _RADAR_DEFAULTS = {
-    "perf_color": "#0072b2",
-    "resource_color": "#d55e00",
     "poly_color": "#2b2b2b",
     "baseline_color": "#8a8a8a",
     "grid_color": "#cfcfcf",
@@ -2106,6 +2119,9 @@ _RADAR_DEFAULTS = {
     "perf_norm": "minmax",     # "minmax" (across shown modes) | "absolute" (fixed band)
     "fhe_n_bits": 8,
     "primary_synth": ["arf", "bayesian_network", "ctgan", "gaussian_copula", "nflow"],
+    "envelope": False,            # true -> shaded p25-p75 band instead of the mean
+    "envelope_quantiles": (25, 75),
+    "envelope_band_alpha": 0.12,
 }
 
 
@@ -2230,6 +2246,28 @@ def _radar_aggregate(mode_subs):
     return means, cells
 
 
+def _radar_cell_quantile(cells, q):
+    """
+    {mode_key: {col: value}} at percentile ``q`` over the (dataset, model) cells.
+
+    Shaped exactly like the ``means`` dict from _radar_aggregate, so the same
+    normalisation loop applies to either. Empty/all-NaN columns yield NaN, which the
+    drawing code already tolerates.
+
+    Note this is a PER-AXIS quantile: the polygon it produces is an envelope over the
+    cells, not any single (dataset, model) combination.
+    """
+    out = {}
+    for key, per_col in cells.items():
+        vals = {}
+        for c, arr in per_col.items():
+            a = np.asarray(arr, dtype=float)
+            a = a[np.isfinite(a)]
+            vals[c] = float(np.percentile(a, q)) if a.size else np.nan
+        out[key] = vals
+    return out
+
+
 def _radar_axis_transforms(means, rcfg):
     """
     Build one normaliser per axis (col -> callable mapping a value/array to [0,1]).
@@ -2287,16 +2325,19 @@ def _radar_axis_transforms(means, rcfg):
     return transforms
 
 
-def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
+def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles, values_band=None):
     """
     Draw one mode's radar into a polar axes.
 
-    values   : normalised [0,1] per axis (len == len(angles))
-    baseline : normalised Real reference per axis, or None (Real's own panel)
-    spread   : (lo_list, hi_list) normalised IQR per axis, or None
+    values      : normalised [0,1] per axis (len == len(angles)), or None to draw
+                  the band alone
+    baseline    : normalised Real reference per axis, or None (Real's own panel)
+    spread      : (lo_list, hi_list) normalised IQR per axis, or None
+    values_band : (lo_list, hi_list) normalised quantile band, or None
+
+    The band is an explicit ring polygon (out along one edge, back along the other)
+    rather than fill_between, which would depend on polar path interpolation.
     """
-    perf_c = rcfg["perf_color"]
-    res_c = rcfg["resource_color"]
     poly_c = rcfg["poly_color"]
     base_c = rcfg["baseline_color"]
     grid_c = rcfg["grid_color"]
@@ -2308,34 +2349,13 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
     ax.spines["polar"].set_visible(False)
     ax.set_facecolor("none")
 
-    # group wedge washes spanning each group's actual angular extent (padded by
-    # half a step on each side), so the wash follows the group even though the
-    # axes are spaced evenly around the whole circle. Drawn as explicit wedges
-    # (centre -> rim -> arc -> rim -> centre) for version-stable rendering.
-    half_step = np.pi / len(angles)   # = (2*pi / n) / 2
-
-    def _wash(a0, a1, color):
-        t = np.linspace(a0, a1, 160)
-        ax.fill(np.concatenate([[a0], t, [a1]]),
-                np.concatenate([[0.0], np.ones_like(t), [0.0]]),
-                color=color, alpha=0.06, linewidth=0, zorder=0)
-
-    perf_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "perf"]
-    res_ang = [a for a, (_c, _s, g) in zip(angles, _RADAR_AXES) if g == "resource"]
-    if perf_ang:
-        _wash(perf_ang[0] - half_step, perf_ang[-1] + half_step, perf_c)
-    if res_ang:
-        _wash(res_ang[0] - half_step, res_ang[-1] + half_step, res_c)
-
-    # concentric hairline gridlines
+    # plain hairline grid: concentric rings + one spoke per axis. The performance /
+    # resource split is carried by the axis order and the caption, not by colour.
     circ = np.linspace(0, 2 * np.pi, 240)
     for r in (0.25, 0.5, 0.75, 1.0):
         ax.plot(circ, np.full_like(circ, r), color=grid_c, lw=0.6, zorder=1)
-
-    # radial spokes coloured by group
-    for ang, (_col, _short, group) in zip(angles, _RADAR_AXES):
-        spoke_c = perf_c if group == "perf" else res_c
-        ax.plot([ang, ang], [0, 1], color=spoke_c, lw=0.7, alpha=0.45, zorder=1)
+    for ang in angles:
+        ax.plot([ang, ang], [0, 1], color=grid_c, lw=0.6, zorder=1)
 
     # axis short-codes, anchored outward from the rim with angle-based alignment so
     # a label never straddles the ring, crowds the panel title, or spills onto a
@@ -2349,8 +2369,10 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
                 fontsize=6, color="#52514e", zorder=6)
 
     theta = np.concatenate([angles, angles[:1]])
+    band_alpha = float(rcfg.get("envelope_band_alpha", 0.12))
 
-    # IQR spread whiskers (radial p25->p75 at each vertex)
+    # IQR spread whiskers (radial p25->p75 at each vertex). Suppressed in the
+    # envelope variant, where the band already carries exactly this information.
     if spread is not None:
         lo, hi = spread
         for ang, l, h in zip(angles, lo, hi):
@@ -2358,20 +2380,35 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles):
                 ax.plot([ang, ang], [l, h], color=poly_c, lw=1.0,
                         alpha=0.28, zorder=3, solid_capstyle="round")
 
-    # Real baseline reference (dashed, no fill), drawn in the standard-mode colour
+    # Real baseline reference: the mean, dashed, no fill, in the standard-mode colour
     if baseline is not None:
         b = np.concatenate([baseline, baseline[:1]])
         ax.plot(theta, b, color=base_c, lw=1.5, linestyle=(0, (4, 2)),
                 zorder=3, solid_capstyle="round")
 
+    # mode band: a ring between the two quantile edges — out along one edge and back
+    # along the other, as one closed polygon. Which edge is outermost flips between
+    # the two halves (the resource axes are inverted); the ring does not care.
+    if values_band is not None:
+        lo_c = np.concatenate([values_band[0], values_band[0][:1]])
+        hi_c = np.concatenate([values_band[1], values_band[1][:1]])
+        if np.all(np.isfinite(lo_c)) and np.all(np.isfinite(hi_c)):
+            ax.fill(np.concatenate([theta, theta[::-1]]),
+                    np.concatenate([hi_c, lo_c[::-1]]),
+                    color=poly_c, alpha=band_alpha, linewidth=0, zorder=4)
+        for edge in (lo_c, hi_c):
+            ax.plot(theta, edge, color=poly_c, lw=0.9, alpha=0.85,
+                    zorder=5, solid_capstyle="round")
+
     # mode polygon (neutral slate; fill only if every vertex is finite)
-    v = np.concatenate([values, values[:1]])
-    if np.all(np.isfinite(values)):
-        ax.fill(theta, v, color=poly_c, alpha=0.14, linewidth=0, zorder=4)
-    ax.plot(theta, v, color=poly_c, lw=2.0, zorder=5,
-            solid_capstyle="round", solid_joinstyle="round")
-    ax.plot(angles, values, "o", color=poly_c, markersize=3.5,
-            markeredgecolor="white", markeredgewidth=1.0, zorder=6)
+    if values is not None:
+        v = np.concatenate([values, values[:1]])
+        if np.all(np.isfinite(values)):
+            ax.fill(theta, v, color=poly_c, alpha=0.14, linewidth=0, zorder=4)
+        ax.plot(theta, v, color=poly_c, lw=2.0, zorder=5,
+                solid_capstyle="round", solid_joinstyle="round")
+        ax.plot(angles, values, "o", color=poly_c, markersize=3.5,
+                markeredgecolor="white", markeredgewidth=1.0, zorder=6)
 
 
 def plot_radar_overview_multipanel(
@@ -2382,12 +2419,32 @@ def plot_radar_overview_multipanel(
     IEEE full-width multipanel radar — one panel per mode, aggregated over all
     datasets x models, with a performance half and an inverted resource-cost half.
 
+    ``radar.envelope`` picks how each mode is drawn:
+
+    false (default)
+        One polygon per mode: the mean over (dataset x model) cells, with short
+        radial IQR whiskers at the vertices.
+
+    true
+        A shaded band between the two ``radar.envelope_quantiles`` (p25-p75) over
+        those same cells, with no centre line, exposing how much the cells disagree.
+        Real stays the single dashed mean either way, so there is one reference line
+        to read every mode against.
+
+        Two notes, both of which belong in the caption. The band is a PER-AXIS
+        quantile, so neither edge is a real (dataset, model) combination. And radii
+        are not comparable with the mean version: both apply the same normalisers,
+        but the mean version fits their ranges to the mode means while the envelope
+        fits to the quantiles it draws (which overshoot those means by 4-32% on the
+        resource axes, enough to pin FHE at the centre and Real at the rim).
+
     Saved as: radar_overview_multipanel.{fmt}
     """
     if cfg is None:
         cfg = _load_viz_config(viz_cfg_path)
 
     rcfg = _radar_cfg(cfg)
+    envelope = bool(rcfg["envelope"])
     fig_cfg = cfg["figures"]
     _apply_publication_style(cfg)
 
@@ -2400,11 +2457,39 @@ def plot_radar_overview_multipanel(
         return
 
     means, cells = _radar_aggregate(mode_subs)
-    transforms = _radar_axis_transforms(means, rcfg)
 
-    norm_mean, norm_spread = {}, {}
-    for key in means:
-        norm_mean[key] = [float(transforms[c](means[key][c])) for c in cols]
+    raw_q = None
+    if envelope:
+        raw_q = {name: _radar_cell_quantile(cells, float(q))
+                 for name, q in zip(("lo", "hi"), rcfg["envelope_quantiles"])}
+
+    # Both variants use the same normalisers (perf_norm for the top half, log minmax
+    # inverted for the bottom); only the range they are fitted to differs. The mean
+    # figure fits to the mode means, which the envelope's quantile edges overshoot
+    # (4-32% on the resource axes) — enough to pin the cheapest and most expensive
+    # modes to the rim and the centre. So fit to the values actually drawn:
+    # _minmax_across_modes only iterates the dict it is handed, so passing the
+    # quantile edges keyed per (mode, quantile) widens the range without touching
+    # _radar_axis_transforms.
+    scale_src = means
+    if envelope:
+        scale_src = {f"{k}@{name}": d[k] for name, d in raw_q.items() for k in d}
+    transforms = _radar_axis_transforms(scale_src, rcfg)
+
+    def _normalise(per_mode):
+        """{mode: {col: raw}} -> {mode: [normalised value per axis, in cols order]}."""
+        return {k: [float(transforms[c](per_mode[k][c])) for c in cols]
+                for k in per_mode}
+
+    norm_mean = _normalise(means)
+
+    # Envelope variant: both edges go through the very same per-axis transforms, so
+    # they share one scale. The mean variant instead keeps its vertex whiskers.
+    norm_q = {n: _normalise(d) for n, d in raw_q.items()} if envelope else None
+
+
+    norm_spread = {}
+    for key in ([] if envelope else means):
         lo, hi = [], []
         for c in cols:
             arr = np.asarray(transforms[c](cells[key][c]), dtype=float)
@@ -2419,9 +2504,10 @@ def plot_radar_overview_multipanel(
 
     raw_keys = [k for k, _ in mode_subs]
     label_map, _color_map, _group_map = _build_mode_display(cfg, raw_keys)
+    # Real (standard) is the dashed reference on every panel, not its own panel, drawn
+    # in the standard-mode colour (green) for continuity with the other figures. It is
+    # always the mean, in both variants — one clean reference line to read against.
     baseline_vec = norm_mean.get("standard")
-    # Real (standard) is the dashed reference on every panel, not its own panel,
-    # drawn in the standard-mode colour (green) for continuity with the other figures.
     rcfg["baseline_color"] = _mode_color(cfg, "standard")
     panel_keys = [k for k in raw_keys if k != "standard"]
     angles = np.deg2rad(_RADAR_ANGLES_DEG)
@@ -2441,27 +2527,45 @@ def plot_radar_overview_multipanel(
     for idx in range(n_panels):
         key = panel_keys[idx]
         ax = flat[idx]
-        spread = norm_spread[key] if show_spread else None
-        _draw_radar_panel(ax, norm_mean[key], baseline_vec, spread, rcfg, angles)
+        # The envelope variant is the band alone: no centre line, and the whiskers
+        # would be redundant with the band anyway.
+        spread = norm_spread.get(key) if show_spread else None
+        _draw_radar_panel(ax, None if envelope else norm_mean[key],
+                          baseline_vec, spread, rcfg, angles,
+                          values_band=(norm_q["lo"][key], norm_q["hi"][key])
+                          if envelope else None)
         ax.set_title(label_map.get(key, key), fontsize=label_fs, pad=20)
         _add_panel_label(ax, idx, fontsize=label_fs, x=-0.05)
 
     for j in range(n_panels, total_cells):
         flat[j].set_visible(False)
 
-    # single legend entry: the Real (standard) dashed baseline. Everything else is
-    # explained in the manuscript caption (added separately).
+    # legend: the Real (standard) dashed baseline, plus — in the envelope variant —
+    # what the band spans. Everything else is explained in the manuscript caption.
     if baseline_vec is not None:
         from matplotlib.lines import Line2D
-        real_handle = Line2D([0], [0], color=rcfg["baseline_color"], lw=1.5,
-                             linestyle=(0, (4, 2)), label=label_map.get("standard", "Real"))
-        fig.legend(handles=[real_handle], loc="lower center",
+        real_label = label_map.get("standard", "Real")
+        handles = [Line2D([0], [0], color=rcfg["baseline_color"], lw=1.5,
+                          linestyle=(0, (4, 2)),
+                          label=f"{real_label} (mean)" if envelope else real_label)]
+        if envelope:
+            from matplotlib.patches import Patch
+            from matplotlib.colors import to_rgba
+            # RGBA face rather than a patch-wide alpha, so the swatch reproduces the
+            # band exactly: fill at band_alpha, edge at the edge stroke's alpha.
+            q_lo, q_hi = rcfg["envelope_quantiles"]
+            handles.append(Patch(facecolor=to_rgba(rcfg["poly_color"],
+                                                   float(rcfg["envelope_band_alpha"])),
+                                 edgecolor=to_rgba(rcfg["poly_color"], 0.85),
+                                 linewidth=0.9,
+                                 label=f"p{q_lo:g}-p{q_hi:g} across datasets x models"))
+        fig.legend(handles=handles, loc="lower center", ncol=len(handles),
                    bbox_to_anchor=(0.5, 0.0), frameon=False, fontsize=8)
 
     fig.subplots_adjust(left=0.06, right=0.94, top=0.88, bottom=0.09,
                         wspace=0.55, hspace=0.72)
 
-    base_save_path = Path(save_dir) / f"radar_overview_multipanel"
+    base_save_path = Path(save_dir) / "radar_overview_multipanel"
     _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
     plt.close(fig)
 

@@ -151,15 +151,12 @@ roc:
 # Radar overview figure — one polar panel per mode, aggregated over all
 # datasets x models. Performance axes fill the TOP half (absolute [0,1] band);
 # resource-cost axes fill the BOTTOM half (log + min-max across the shown modes,
-# inverted) so "outward = better" on every axis. The two group hues are drawn
-# from the Okabe-Ito palette and are validated colorblind-safe (blue vs
-# vermilion: CVD dE >= 21, both >= 3:1 contrast on white).
+# inverted) so "outward = better" on every axis. The split is carried by axis order
+# and the caption; the panel background is plain.
 radar:
-  perf_color: "#0072b2"        # performance group (Okabe-Ito blue)
-  resource_color: "#d55e00"    # resource group (Okabe-Ito vermilion)
-  poly_color: "#2b2b2b"        # per-mode polygon — neutral, identical every panel
+  poly_color: "#2b2b2b"        # per-mode polygon/band — neutral, identical every panel
   baseline_color: "#8a8a8a"    # Real reference polygon (dashed, non-Real panels)
-  grid_color: "#cfcfcf"        # concentric hairline gridlines
+  grid_color: "#cfcfcf"        # hairline rings and spokes
   # Performance-axis normalization:
   #   minmax   -> per-axis min-max across the shown modes (lowest=0, highest=1)
   #   absolute -> map raw metric through perf_band (true magnitude, stable)
@@ -167,3 +164,12 @@ radar:
   perf_band: [0.5, 1.0]        # radial band when perf_norm: absolute
   fhe_n_bits: 8                # which FHE bit-width gets a panel
   primary_synth: [arf, bayesian_network, ctgan, gaussian_copula, nflow]
+  # Variability variant. false: each mode is its mean polygon plus IQR whiskers.
+  # true: each mode becomes a shaded p25-p75 band over the (dataset x model) cells
+  # with no centre line. Real is the dashed mean either way. One figure per run —
+  # flip this and re-run to compare. Radii are not comparable between the two: the
+  # mean version fits its min-max ranges to the mode means, the envelope to the
+  # quantiles it draws (which overshoot by 4-32% on the resource axes).
+  envelope: false
+  envelope_quantiles: [25, 75]   # the two band edges
+  envelope_band_alpha: 0.12      # band fill opacity
