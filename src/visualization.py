@@ -6,10 +6,11 @@ from functools import lru_cache
 from pathlib import Path
 import matplotlib.colors as mcolors
 import numpy as np
+from matplotlib.collections import PolyCollection
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
-from matplotlib.ticker import FuncFormatter
+from matplotlib.ticker import FuncFormatter, MaxNLocator
 
 from src.utils import parse_filename_metadata
 
@@ -269,6 +270,21 @@ def _lightness_ramp(base_color, n, lightness_range):
     return colors
 
 
+def _darken(color, factor):
+    """
+    Return `color` with its HLS lightness scaled by `factor` (< 1 darkens).
+
+    Used for violin outlines, which are derived from each violin's own fill so a
+    twelve-colour axis keeps crisp, colour-matched edges instead of one flat
+    default edge shared by every body.
+    """
+    r, g, b = mcolors.to_rgb(color)
+    h, lightness, s = colorsys.rgb_to_hls(r, g, b)
+    return mcolors.to_hex(
+        colorsys.hls_to_rgb(h, max(0.0, min(1.0, lightness * factor)), s)
+    )
+
+
 def _mode_color(cfg, key):
     """
     Single flat colour for a mode_key (no lightness ramp).
@@ -365,10 +381,25 @@ def _build_mode_display(cfg, raw_keys):
 # VIOLIN PLOTS (BOOTSTRAP DISTRIBUTIONS)
 # ===========================================================
 
-def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True):
+def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True,
+                          label_fontsize=None, label_y=1.01):
     """
-    Draw vertical separator lines between mode groups and optionally annotate
-    with group name labels just above the axes top.
+    Mark the mode-group boundaries (real / synthetic / FHE) and optionally annotate
+    each group just above the axes top.
+
+    The cue is controlled by `separators.style`: "shading" tints a faint band behind
+    each group with that group's base_color, "line" draws the original dashed rules
+    on the boundaries, "both" draws each. Shading is the default because three dashed
+    rules across a dense 12-mode axis read as clutter, and because the band behind the
+    single-member `real` group doubles as the visual anchor for the reference mode.
+
+    label_fontsize : override for `separators.group_label_fontsize`. The config value
+                     is sized for the single-panel figures; the multipanels need a
+                     much smaller one.
+    label_y        : label position in axes-fraction y (1.0 == the top spine).
+                     Values >= 1 sit above the axes, negative values below the x tick
+                     labels as the second level of a two-level axis; the text is
+                     anchored accordingly.
     """
     sep_cfg = cfg.get("separators", {})
     if not sep_cfg.get("enabled", True):
@@ -390,34 +421,131 @@ def _add_group_separators(ax, order, label_group_map, cfg, show_labels=True):
             current_start = i
     group_spans.append((current_group, current_start, len(groups_in_order) - 1))
 
-    for xpos in separator_xpos:
-        ax.axvline(
-            x=xpos,
-            color=sep_cfg.get("color", "#cccccc"),
-            linewidth=sep_cfg.get("linewidth", 0.8),
-            linestyle=sep_cfg.get("linestyle", "--"),
-            zorder=0,
-        )
+    style = sep_cfg.get("style", "shading")
+
+    if style in ("shading", "both"):
+        # Bands sit at zorder 0, below the gridlines (0.5 via set_axisbelow) and the
+        # violins (1), and are drawn edgeless so adjacent groups butt up seamlessly.
+        band_alpha = sep_cfg.get("band_alpha", 0.07)
+        for group_name, start_idx, end_idx in group_spans:
+            ax.axvspan(
+                start_idx - 0.5, end_idx + 0.5,
+                color=groups_cfg.get(group_name, {}).get("base_color", "#999999"),
+                alpha=band_alpha,
+                linewidth=0,
+                zorder=0,
+            )
+
+    if style in ("line", "both"):
+        for xpos in separator_xpos:
+            ax.axvline(
+                x=xpos,
+                color=sep_cfg.get("color", "#cccccc"),
+                linewidth=sep_cfg.get("linewidth", 0.8),
+                linestyle=sep_cfg.get("linestyle", "--"),
+                zorder=0,
+            )
 
     if show_labels and sep_cfg.get("show_group_labels", True):
         xform = ax.get_xaxis_transform()
+        if label_fontsize is None:
+            label_fontsize = sep_cfg.get("group_label_fontsize", 7)
+        label_va = "bottom" if label_y >= 1.0 else "top"
+        # A group of one needs no header: it would sit directly under its own mode
+        # code and read as a duplicate ("Real" over "Real").
+        min_span = sep_cfg.get("label_min_span", 2)
         for group_name, start_idx, end_idx in group_spans:
+            if (end_idx - start_idx + 1) < min_span:
+                continue
             center_x = (start_idx + end_idx) / 2.0
             label = groups_cfg.get(group_name, {}).get("label", group_name)
             ax.text(
-                center_x, 1.01,
+                center_x, label_y,
                 label,
                 transform=xform,
-                ha="center", va="bottom",
-                fontsize=sep_cfg.get("group_label_fontsize", 7),
+                ha="center", va=label_va,
+                fontsize=label_fontsize,
                 color=sep_cfg.get("group_label_color", "#aaaaaa"),
                 fontstyle="italic",
                 clip_on=False,
             )
 
 
-def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg, show_strip=True):
-    """Render violinplot (+ optional stripplot) onto ax. subset must have a 'mode_label' column."""
+def _style_violin_bodies(ax, order, color_map, violin_cfg):
+    """
+    Restyle the violin bodies: translucent fill, opaque colour-matched outline.
+
+    The blunt alternative (``for c in ax.collections: c.set_alpha(...)``, which this
+    replaces) also faded the outlines and the inner box, which is what made the
+    violins look mushy once they were printed at ~0.4in wide. Setting facecolor and
+    edgecolor separately keeps the fill translucent while every line stays crisp.
+
+    seaborn draws the bodies as PolyCollections and the inner marks as Line2D /
+    PathCollection artists, so the bodies are picked out by type. If that assumption
+    ever stops holding the count guard fails and we fall back to the old uniform
+    alpha rather than mis-colouring the panel.
+    """
+    alpha  = violin_cfg["alpha"]
+    bodies = [c for c in ax.collections if isinstance(c, PolyCollection)]
+
+    if len(bodies) != len(order):
+        for collection in ax.collections:
+            collection.set_alpha(alpha)
+        return
+
+    edge_factor = violin_cfg.get("edge_lightness", 0.62)
+    for body, label in zip(bodies, order):
+        fill = color_map.get(label)
+        if fill is None:
+            body.set_alpha(alpha)
+            continue
+        body.set_facecolor(mcolors.to_rgba(fill, alpha))
+        body.set_edgecolor(_darken(fill, edge_factor))
+        body.set_linewidth(violin_cfg["linewidth"])
+
+
+def _add_reference_baseline(ax, subset, metric, reference_label, violin_cfg):
+    """
+    Horizontal reference line at the median of the reference mode (Real), with an
+    optional band over its interquartile range.
+
+    Without it the reader has to saccade back to the leftmost violin for every one of
+    the eleven comparisons the panel invites, which is the entire question the figure
+    answers. Drawn above the violin bodies but below their inner boxes, so it stays
+    legible across the panel without hiding any median.
+    """
+    base_cfg = violin_cfg.get("baseline", {})
+    if not base_cfg.get("enabled", True) or reference_label is None:
+        return
+
+    values = subset.loc[subset["mode_label"] == reference_label, metric].dropna()
+    if values.empty:
+        return
+
+    color = base_cfg.get("color", "#6e6e6e")
+    ax.axhline(
+        values.median(),
+        color=color,
+        linestyle=base_cfg.get("linestyle", "--"),
+        linewidth=base_cfg.get("linewidth", 0.7),
+        zorder=1.5,
+    )
+
+    band_alpha = base_cfg.get("band_alpha", 0.0)
+    if band_alpha > 0:
+        q1, q3 = values.quantile([0.25, 0.75])
+        ax.axhspan(q1, q3, color=color, alpha=band_alpha, linewidth=0, zorder=0.4)
+
+
+def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg, show_strip=True,
+                           reference_label=None, y_max_ticks=None):
+    """
+    Render violinplot (+ optional stripplot) onto ax. subset must have a 'mode_label' column.
+
+    reference_label : mode label whose median is drawn as a horizontal reference across
+                      the panel (the "Real" label); None disables it.
+    y_max_ticks     : cap on y tick count, for the short stacked multipanel panels.
+    """
     sns.violinplot(
         data=subset,
         x="mode_label",
@@ -433,8 +561,8 @@ def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg, sho
         ax=ax,
     )
 
-    for collection in ax.collections:
-        collection.set_alpha(violin_cfg["alpha"])
+    _style_violin_bodies(ax, order, color_map, violin_cfg)
+    _add_reference_baseline(ax, subset, metric, reference_label, violin_cfg)
 
     if show_strip:
         sns.stripplot(
@@ -457,7 +585,18 @@ def _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg, sho
 
     grid_alpha = violin_cfg.get("grid_alpha", 0.0)
     if grid_alpha > 0:
-        ax.grid(axis="y", alpha=grid_alpha, linewidth=0.5)
+        # set_axisbelow drops the gridlines to zorder 0.5: above the group shading
+        # bands (0) but below the violins (1), so they stop cutting across the bodies.
+        ax.set_axisbelow(True)
+        ax.grid(
+            axis="y",
+            alpha=grid_alpha,
+            linewidth=violin_cfg.get("grid_linewidth", 0.5),
+            linestyle=violin_cfg.get("grid_linestyle", "-"),
+        )
+
+    if y_max_ticks:
+        ax.yaxis.set_major_locator(MaxNLocator(nbins=y_max_ticks))
 
 
 def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
@@ -513,7 +652,8 @@ def plot_violinplot(dataset, model, metric, df=None, cfg=None, save_dir=None,
         plot_col = f"__log10_{metric}"
         subset[plot_col] = np.log10(subset[metric].clip(lower=1e-12))
 
-    _draw_violinplot_panel(ax, subset, plot_col, order, color_map, violin_cfg)
+    _draw_violinplot_panel(ax, subset, plot_col, order, color_map, violin_cfg,
+                           reference_label=label_map.get("standard"))
     _add_group_separators(ax, order, label_group_map, cfg, show_labels=True)
 
     ylabel = format_metric_name(metric)
@@ -863,6 +1003,21 @@ def plot_synth_scale_lines(dataset, model, metric, df=None, cfg=None, save_dir=N
 
 _IEEE_FULL_WIDTH_IN = 7.16
 
+# Target width for figures placed at \textwidth in the manuscript. The Overleaf
+# document is elsarticle[preprint,12pt] on A4 with no geometry package, so
+# \the\textwidth is 390pt = 5.40in. Generating at IEEE width instead and then placing
+# at 0.47\textwidth rendered these figures at 0.36x, which dragged 7pt tick labels
+# down to ~2.5pt on the page — under any journal's 6pt floor. Generating at exactly
+# the on-page width means the point sizes set below are the point sizes that print.
+# Overridable via `figures.page_width_in` so a change of page geometry is one number.
+_PAGE_WIDTH_IN = 5.40
+
+
+def _page_width_in(cfg):
+    """Target on-page figure width in inches (config `figures.page_width_in`)."""
+    return float(cfg.get("figures", {}).get("page_width_in", _PAGE_WIDTH_IN))
+
+
 _DATASET_LABELS = {
     "cardiotocography": "Cardiotocography",
     "diabetes": "Diabetes",
@@ -944,6 +1099,28 @@ def _dataset_row_label(name: str) -> str:
 _GRID_CHROME_IN = 1.05        # column titles + bottom axis label + x tick labels
 
 
+# ---- Stacked violin multipanel geometry ---------------------------------------
+#
+# These are placed one under another at \textwidth, so the budget that matters is
+# height rather than width: against ~8.6in of A4 text height the target is two
+# datasets per float page. Panel height is the knob to turn once a compiled page has
+# actually been looked at.
+_VIOLIN_PANEL_H_IN = 0.95     # drawn height of one model panel
+_VIOLIN_TOP_IN     = 0.20     # "(a) LR" tag above the top panel
+_VIOLIN_BOTTOM_IN  = 0.52     # mode codes, then the group names under them
+_VIOLIN_HSPACE     = 0.22     # inter-panel gap, as a fraction of panel height
+# Group names go BELOW the mode codes, as the second level of a two-level axis. The
+# strip above each panel is spoken for by its "(a) LR" tag, and the marker row inside
+# the panel rules out putting that tag in the top-left corner instead: at three
+# glyphs a marker on the first synthesizer runs straight into it.
+_VIOLIN_GROUP_LABEL_Y = -0.26  # axes-fraction y for the group names
+
+# Fraction of the data range reserved above it for the significance marker row.
+# Applied to every panel whether or not that panel carries markers, so the panels of
+# one dataset stay on one scale.
+_VIOLIN_MARKER_HEADROOM = 0.18
+
+
 def _grid_fig_height(n_row, row_height, legend_rows=1):
     """Total figure height for a transposed grid, in inches."""
     return row_height * n_row + _GRID_CHROME_IN + 0.16 * legend_rows
@@ -954,21 +1131,25 @@ def _grid_bottom_frac(fig_h, legend_rows=1):
     return (0.34 + 0.15 * legend_rows) / fig_h
 
 
-def _add_panel_label(ax, idx: int, fontsize: int = 8, x: float = -0.14, suffix: str = ""):
+def _add_panel_label(ax, idx: int, fontsize: int = 8, x: float = -0.14, suffix: str = "",
+                     y: float = 1.05, va: str = "bottom"):
     """
     Bold (a), (b), … label at the upper-left of an axes panel.
 
     x       : horizontal offset in axes coords. Use a smaller magnitude for
               full-width single-column panels than for narrow grid panels.
     suffix  : optional text appended after the letter, e.g. a model tag → "(a) LR".
+    y, va   : vertical placement in axes coords. The default sits just above the top
+              spine; pass y < 1 with va="top" to place the label inside the panel,
+              which frees the strip above the axes for other annotation.
     """
     letter = chr(ord("a") + idx)
     text = f"({letter}) {suffix}" if suffix else f"({letter})"
     ax.text(
-        x, 1.05, text,
+        x, y, text,
         transform=ax.transAxes,
         fontsize=fontsize, fontweight="bold",
-        va="bottom", ha="left",
+        va=va, ha="left",
         clip_on=False,
     )
 
@@ -984,6 +1165,13 @@ def _apply_publication_style(cfg):
     sns.set_context(cfg.get("context", "paper"))
     plt.rcParams.update({
         "font.family": cfg["fonts"].get("family", "sans-serif"),
+        # The manuscript loads \usepackage{helvet}, so preferring Helvetica here makes
+        # figure text match the body text. Names matplotlib cannot resolve on the host
+        # are skipped (with a warning), hence the metric clones before the DejaVu Sans
+        # backstop — a headless Linux runner has none of the first three.
+        "font.sans-serif": cfg["fonts"].get(
+            "sans_serif",
+            ["Helvetica", "Arial", "Nimbus Sans", "Liberation Sans", "DejaVu Sans"]),
         "pdf.fonttype": 42,
         "ps.fonttype": 42,
     })
@@ -1440,7 +1628,7 @@ def _significance_marker(p, levels):
     return None
 
 
-def _mark_significant(ax, sorted_keys, marked, levels=None, fontsize=8):
+def _mark_significant(ax, sorted_keys, marked, levels=None, fontsize=8, expand_ylim=True):
     """
     Draw a significance marker above every violin in `marked`, at a constant
     height so the markers read as a scannable row rather than tracking each
@@ -1448,6 +1636,12 @@ def _mark_significant(ax, sorted_keys, marked, levels=None, fontsize=8):
 
     `marked` maps mode_key -> Holm-corrected p; `levels` maps marker -> upper
     bound (config/visualization.yaml `significance.levels`).
+
+    expand_ylim : reserve the marker headroom here by growing the y-limit. Pass False
+                  when the caller has already set a shared y-limit that includes the
+                  headroom — expanding per panel would otherwise give a marked panel
+                  and an unmarked one different scales for a reason that has nothing
+                  to do with the data.
     """
     if not marked:
         return
@@ -1461,8 +1655,9 @@ def _mark_significant(ax, sorted_keys, marked, levels=None, fontsize=8):
 
     # Headroom so the markers clear the violins. "***" is no taller than "*",
     # but the extra room keeps a three-glyph marker off the panel label.
-    y0, y1 = ax.get_ylim()
-    ax.set_ylim(y0, y1 + 0.15 * (y1 - y0))
+    if expand_ylim:
+        y0, y1 = ax.get_ylim()
+        ax.set_ylim(y0, y1 + 0.15 * (y1 - y0))
 
     for xi, marker in tiers:
         ax.annotate(marker, xy=(xi, 0.93), xycoords=("data", "axes fraction"),
@@ -1521,17 +1716,35 @@ def plot_violinplot_multipanel(
     viz_cfg_path="config/visualization.yaml",
 ):
     """
-    IEEE full-width violin multipanel — one file per dataset.
+    Page-width violin multipanel — one file per dataset.
 
     For each dataset a separate figure is written: a vertical column of violin panels
     (one per model) that share a single y-axis label. Each panel plots `metric`
     (default ROC-AUC) bootstrap distributions across all modes (Real, synthesizers,
-    FHE bit-widths) on the x-axis, coloured by group with vertical group separators.
+    FHE bit-widths) on the x-axis, tinted by group with shaded group bands.
     Violins only (no strip dots).
 
+    Geometry: the figure is emitted at exactly `figures.page_width_in` and saved with
+    no tight bounding box, so the PDF media box is that width and
+    \\includegraphics[width=\\textwidth] renders it at 1:1. That is what makes the point
+    sizes below the point sizes that actually print — do not reintroduce
+    bbox_inches="tight" here, which trims to an unpredictable width and silently
+    rescales all the type. Panel height is `_VIOLIN_PANEL_H_IN`; the intent is that
+    two datasets fit on one float page, so that is the number to tune after looking at
+    a compiled page.
+
+    Each panel is drawn on one shared y-limit per dataset, computed across all three
+    models with the significance headroom reserved unconditionally, so the panels of a
+    dataset can be compared by eye — which is the whole point of stacking them — and
+    so a marked panel is not scaled differently from an unmarked one.
+
     The mode axis carries short codes (Real, ARF, BN, CTGAN, GC, NF, FHE-2…FHE-12)
-    since the full names overlap at IEEE width. Mode colours/order are computed once
+    since the full names overlap at page width. Mode colours/order are computed once
     from the global mode set, so every dataset file is directly comparable.
+
+    The dataset name is deliberately NOT drawn: these are placed as subfigures whose
+    LaTeX subcaption already names the dataset, and dropping the in-figure title buys
+    back the vertical space that gets two datasets onto a page.
 
     Canonical scale-100 view: synthesizer rows are filtered to synth_scale == 100 so
     each synthesizer contributes a single violin (matches how the single-panel violins
@@ -1582,8 +1795,12 @@ def plot_violinplot_multipanel(
 
     n_model   = len(models_sorted)
     n_mode    = len(order)
-    tick_fs   = 7
-    label_fs  = 8
+    font_cfg  = cfg["fonts"]
+    # True printed point sizes: the figure renders 1:1 at \textwidth (see docstring).
+    tick_fs   = font_cfg.get("panel_tick_size", 8)
+    label_fs  = font_cfg.get("panel_label_size", 9)
+    fig_w     = _page_width_in(cfg)
+    ref_label = label_map.get("standard")       # "Real" — the baseline reference
 
     # Significance markers: a tiered symbol per mode that is significantly WORSE
     # than Real. Absent tests leave this empty and the panels render unannotated.
@@ -1592,43 +1809,72 @@ def plot_violinplot_multipanel(
     fmt       = fig_cfg["format"]
     ylabel    = "ROC-AUC" if metric == "roc_auc" else format_metric_name(metric)
 
+    # hspace is a fraction of the average panel height, so the axes region spans
+    # panel_h * (n + (n-1)*hspace) and the two absolute margins sit outside it.
+    fig_h = (_VIOLIN_PANEL_H_IN * (n_model + (n_model - 1) * _VIOLIN_HSPACE)
+             + _VIOLIN_TOP_IN + _VIOLIN_BOTTOM_IN)
+
     for dataset in datasets:
-        # Taller panels than the cramped first cut; extra top/bottom room for the
-        # suptitle and the horizontal x-codes.
-        fig_h = n_model * 1.9 + 0.9
+        ds_data = data[data["dataset"] == dataset]
+        if ds_data.empty:
+            continue
+
+        # One y-limit for the whole dataset, so its three model panels can be read
+        # against each other. cut=0 truncates each KDE at the observed data, so the
+        # data range is the true drawn extent and nothing gets clipped.
+        lo, hi = float(ds_data[metric].min()), float(ds_data[metric].max())
+        span   = (hi - lo) or (abs(hi) or 1.0) * 0.05
+        ylim   = (lo - 0.05 * span, hi + _VIOLIN_MARKER_HEADROOM * span)
+
         fig, axes = plt.subplots(
             n_model, 1,
-            figsize=(_IEEE_FULL_WIDTH_IN, fig_h),
-            gridspec_kw={"hspace": 0.18},
+            figsize=(fig_w, fig_h),
+            gridspec_kw={"hspace": _VIOLIN_HSPACE},
+            sharey=True,
             squeeze=False,
         )
         # Reserve margins in absolute inches (predictable without a local render):
-        # left = y-ticks + supylabel, top = suptitle, bottom = horizontal x-codes.
+        # left = y-ticks + supylabel, top = group band labels, bottom = mode codes.
         fig.subplots_adjust(
-            left=0.85 / _IEEE_FULL_WIDTH_IN,
-            right=0.99,
-            top=1 - 0.5 / fig_h,     # room for suptitle + top panel's (a) tag
-            bottom=0.45 / fig_h,     # room for horizontal x-codes
+            left=0.66 / fig_w,
+            right=1 - 0.10 / fig_w,     # half of the "FHE-12" tick label overhangs
+            top=1 - _VIOLIN_TOP_IN / fig_h,
+            bottom=_VIOLIN_BOTTOM_IN / fig_h,
         )
 
         for mi, model in enumerate(models_sorted):
             ax     = axes[mi, 0]
-            subset = data[(data["dataset"] == dataset) & (data["model"] == model)]
+            subset = ds_data[ds_data["model"] == model]
 
             if not subset.empty:
-                _draw_violinplot_panel(ax, subset, metric, order, color_map, violin_cfg,
-                                       show_strip=False)
-                _add_group_separators(ax, order, label_group_map, cfg, show_labels=False)
+                _draw_violinplot_panel(
+                    ax, subset, metric, order, color_map, violin_cfg,
+                    show_strip=False,
+                    reference_label=ref_label,
+                    y_max_ticks=violin_cfg.get("y_max_ticks"),
+                )
+                # Group names ride under the bottom panel's mode codes only; the
+                # shaded bands carry the grouping on every panel.
+                _add_group_separators(ax, order, label_group_map, cfg,
+                                      show_labels=(mi == n_model - 1),
+                                      label_fontsize=tick_fs,
+                                      label_y=_VIOLIN_GROUP_LABEL_Y)
+                # Headroom is already in `ylim` for every panel, marked or not.
                 _mark_significant(ax, sorted_keys, significant.get((dataset, model), {}),
-                                  levels=sig_levels, fontsize=label_fs)
+                                  levels=sig_levels, fontsize=label_fs,
+                                  expand_ylim=False)
 
             ax.set_xlim(-0.5, n_mode - 0.5)
+            ax.set_ylim(*ylim)
             ax.set_xlabel("")
             ax.set_ylabel("")          # shared y-label added once per figure below
             ax.tick_params(labelsize=tick_fs, length=3, pad=2)
 
-            # Panel letter + model tag, e.g. "(a) LR".
-            _add_panel_label(ax, mi, fontsize=label_fs, x=-0.045,
+            # Panel letter + model tag, e.g. "(a) LR", flush with the y-axis in the
+            # strip above each panel. It cannot go inside the panel: the significance
+            # markers occupy that corner, and a "***" on the first synthesizer sits
+            # close enough to run into a three-glyph tag like "(c) XGB".
+            _add_panel_label(ax, mi, fontsize=label_fs, x=0.0, y=1.02,
                              suffix=_abbrev_model(model))
 
             # Short mode codes (horizontal) only on the bottom panel.
@@ -1638,11 +1884,13 @@ def plot_violinplot_multipanel(
             else:
                 ax.tick_params(labelbottom=False)
 
-        fig.suptitle(_fmt_dataset(dataset), fontsize=label_fs + 1, fontweight="bold")
-        fig.supylabel(ylabel, fontsize=label_fs)   # single shared y-axis label
+        # No dataset title: the LaTeX subcaption already names it (see docstring).
+        fig.supylabel(ylabel, fontsize=label_fs, x=0.012)   # shared y-axis label
 
+        # No bbox_inches="tight" here — the media box must stay exactly fig_w wide so
+        # the figure renders 1:1 at \textwidth.
         base_save_path = Path(save_dir) / f"violinplot_{metric}_multipanel__{dataset}"
-        _save_figure_both_formats(fig, base_save_path, bbox_inches="tight")
+        _save_figure_both_formats(fig, base_save_path)
         plt.close(fig)
 
 

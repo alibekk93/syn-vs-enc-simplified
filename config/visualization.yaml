@@ -5,6 +5,14 @@
 figures:
   dir: results/figures
   format: svg
+  # Target on-page width, in inches, for figures placed at \textwidth. The Overleaf
+  # document is elsarticle[preprint,12pt] on A4 with no geometry package, so
+  # \the\textwidth is 390pt = 5.40in (measured; see
+  # tmp/overleaf/figures/conceptual_overview/README.md). Generating at exactly this
+  # width means \includegraphics[width=\textwidth] renders at 1:1 and the point sizes
+  # below are the point sizes that reach the page. Change this one number if the page
+  # geometry changes (e.g. adding \usepackage[margin=1in]{geometry} -> 6.5).
+  page_width_in: 5.40
 
 # seaborn style / context — controls overall look and element scaling
 # style:   white | whitegrid | ticks | darkgrid
@@ -14,10 +22,22 @@ context: "paper"
 
 fonts:
   family: "sans-serif"    # matplotlib font.family
+  # Preference order for font.sans-serif. The manuscript loads \usepackage{helvet},
+  # so matching Helvetica here makes figure text look native to the page. Any name
+  # matplotlib cannot resolve is skipped, so the list runs Helvetica -> its metric
+  # clones (Arial on Windows/macOS, Nimbus/Liberation Sans on Linux) -> DejaVu Sans,
+  # which always exists but is visibly wider than the body text.
+  sans_serif: ["Helvetica", "Arial", "Nimbus Sans", "Liberation Sans", "DejaVu Sans"]
   title_size: 15
   title_weight: "normal"
   label_size: 15
   tick_size: 13
+  # Sizes for the multipanel figures. Those are generated at `page_width_in` and
+  # placed at \textwidth, i.e. rendered 1:1, so these are true printed point sizes
+  # and must stay above the 6pt floor journals enforce. The single-panel figures
+  # above are scaled down on the page and so carry their own larger numbers.
+  panel_tick_size: 8
+  panel_label_size: 9
 
 # Per-mode display labels and colors.
 # Each mode belongs to a group (real / synthetic / fhe). A mode may set an explicit
@@ -67,7 +87,12 @@ groups:
   fhe:
     label: "FHE"
     base_color: "#8c564b"    # brown (swapped with Normalizing Flow)
-    lightness_range: [0.72, 0.32]   # FHE keeps lightness shading by bit-width
+    # FHE keeps lightness shading by bit-width. The top of the range is capped at
+    # 0.60 rather than the old 0.72: at L=0.72 the lightest step (FHE-2) sits at
+    # 2.14:1 against white and all but disappears at print size. Over [0.60, 0.28]
+    # the six steps run 3.15:1 to 10.0:1, so every one clears the 3:1 threshold while
+    # the ramp keeps the same 3.2x spread that makes the bit-widths tellable apart.
+    lightness_range: [0.60, 0.28]
 
 # Per-model line colors for the FHE complexity-cost plots. That figure contains no
 # mode colors, so this palette is independent of the mode colors above.
@@ -78,13 +103,22 @@ fhe_breakdown:
   fit_color: "#cccccc"            # "fit" segment (compile segment uses the FHE shade ramp)
   group_divider_color: "#dddddd"  # thin separator between model groups (multipanel)
 
-# Vertical separator lines drawn between mode groups on boxplots.
+# Grouping cue between mode groups (real / synthetic / FHE) on the violin panels.
+#   style: shading -> a faint band behind each group, tinted with its base_color
+#          line    -> the original dashed vertical rules on the group boundaries
+#          both    -> shading plus the rules
+# Shading reads more calmly than three dashed rules across a dense 12-mode axis and
+# survives grayscale. As a side effect it gives the single-member `real` group its
+# own band, which is what visually anchors the reference mode.
 separators:
   enabled: true
-  linewidth: 0.8
+  style: "shading"
+  band_alpha: 0.07         # opacity of the group shading band
+  linewidth: 0.8           # the settings below drive style: line | both
   color: "#cccccc"
   linestyle: "--"
   show_group_labels: true
+  label_min_span: 2        # skip the header for a group of one (it duplicates its own code)
   group_label_fontsize: 13
   group_label_color: "#333333"
 
@@ -101,14 +135,40 @@ boxplot:
   despine: true            # remove top and right spines
 
 violinplot:
+  # `alpha` is baked into the fill colours rather than applied to the finished
+  # artists, so the outlines and the inner box stay fully opaque. Fading everything
+  # uniformly is what made the violins look mushy at print size.
   alpha: 0.65
   linewidth: 0.8
-  inner: "quartile"        # box | quartile | point | stick | None
-  cut: 2
+  # `box` draws a miniature box-and-whisker with a white median dot, which reads at
+  # a glance in a 1in-tall panel. `quartile` draws three dashed lines that turn into
+  # noise once each violin is only ~0.4in wide.
+  # NOTE: switching this away from `quartile` invalidates the sentence in the
+  # manuscript caption that describes the inner lines as quartiles.
+  inner: "box"             # box | quartile | point | stick | None
+  # 0 truncates each KDE at the observed data range. The default of 2 extends it two
+  # bandwidths past the data, which for a bounded metric like ROC-AUC draws violins
+  # that visibly exceed 1.0.
+  cut: 0
+  # Violin outline = its own fill darkened to this fraction of the fill's lightness,
+  # so twelve differently coloured violins each get a crisp, colour-matched edge.
+  edge_lightness: 0.62
   strip_alpha: 0.25
   strip_size: 2.5
   grid_alpha: 0.15
+  grid_linewidth: 0.4
+  grid_linestyle: ":"
+  y_max_ticks: 4           # tick cap for the short multipanel panels (null = auto)
   despine: true            # remove top and right spines
+  # Horizontal reference at the median of the Real mode. The figure exists to answer
+  # "is this mode below real data", and without it the reader has to saccade back to
+  # the leftmost violin for every one of the eleven comparisons.
+  baseline:
+    enabled: true
+    color: "#6e6e6e"
+    linestyle: "--"
+    linewidth: 0.7
+    band_alpha: 0.10       # faint band over Real's IQR; set to 0 for the line only
 
 # Significance markers on the violin panels. A marker is drawn on every mode that
 # is significantly WORSE than Real (analyses A1/A2 in results/stats/), and the
