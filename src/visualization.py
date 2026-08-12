@@ -717,7 +717,11 @@ def plot_fhe_training_breakdown(df, save_dir=FIGURES_DIR, cfg=None,
 
         agg = (
             subset.groupby(["model", "n_bits"])[["fhe_fit_time", "fhe_compile_time"]]
-            .mean()
+            # Median, per the project-wide convention. Resource columns are constant
+            # within a cell (one measurement replicated across bootstrap rows), so
+            # this collapses rather than aggregates — but keeping the reducer uniform
+            # is what stops a mean creeping back in on a future grouping change.
+            .median()
             .reset_index()
             .sort_values(["model", "n_bits"])
             .reset_index(drop=True)
@@ -810,7 +814,7 @@ def plot_fhe_complexity_cost(df, save_dir=FIGURES_DIR, cfg=None,
 
         agg = (
             subset.groupby(["model", "n_bits"])[agg_cols]
-            .mean()
+            .median()
             .reset_index()
         )
 
@@ -1211,7 +1215,7 @@ def plot_fhe_complexity_cost_multipanel(
 
     full_agg = (
         fhe_df.groupby(["dataset", "model", "n_bits"])[agg_cols]
-        .mean()
+        .median()
         .reset_index()
     )
 
@@ -1339,7 +1343,7 @@ def plot_fhe_training_breakdown_multipanel(
 
     full_agg = (
         fhe_df.groupby(["dataset", "model", "n_bits"])[["fhe_fit_time", "fhe_compile_time"]]
-        .mean()
+        .median()
         .reset_index()
     )
 
@@ -2031,12 +2035,36 @@ def _fmt_auc(auc):
     return s[1:] if s.startswith("0") else s
 
 
+@lru_cache(maxsize=None)
+def _stored_metric_median(mode, model, dataset, metric="roc_auc"):
+    """
+    Median of the stored bootstrap replicates for one cell, or None if unavailable.
+
+    The ROC panels draw the OBSERVED test-set curve, which is geometry rather than
+    an aggregate, but the AUC printed beside it must be the same number the tables
+    report — otherwise the figure and Table S2 disagree in the third decimal for no
+    reason a reader can see. Reading the stored replicates guarantees agreement by
+    construction instead of re-deriving it from a second resampling pass.
+    """
+    path = Path(_metrics_dir_from_config()) / f"{mode}__{model}__{dataset}__test__metrics.json"
+    if not path.exists():
+        return None
+    values = json.loads(path.read_text(encoding="utf-8")).get("metrics", {}).get(metric)
+    if not values:
+        return None
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    return float(np.median(arr)) if arr.size else None
+
+
 def _draw_roc_panel(ax, curves, fpr_grid, band_labels, annotate_labels,
                     n_boot, seed, auc_fontsize=6, zoom=None):
     """
     Render one ROC panel.
 
-    curves : ordered list of dicts {label, short, color, linestyle, y_true, y_proba}.
+    curves : ordered list of dicts {label, short, color, linestyle, y_true, y_proba},
+             optionally carrying "auc" — the reported (median) AUC for that cell.
+             When absent the observed AUC of the drawn curve is printed instead.
     band_labels     : labels that get a shaded 95% TPR bootstrap band.
     annotate_labels : labels whose AUC is printed in the lower-right block.
     zoom            : axes window, see _roc_zoom. The AUC block stays in the panel's
@@ -2065,7 +2093,10 @@ def _draw_roc_panel(ax, curves, fpr_grid, band_labels, annotate_labels,
                 linewidth=1.1, zorder=3, solid_capstyle="round")
 
         if c["label"] in annotate_labels:
-            annotations.append((c["short"], auc, c["color"]))
+            reported = c.get("auc")
+            annotations.append((c["short"],
+                                auc if reported is None else reported,
+                                c["color"]))
 
     # AUC block in the lower-right whitespace (below the diagonal), stacked so the
     # first curve sits at the top.
@@ -2201,7 +2232,8 @@ def plot_roc_primary_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
             if raw in avail:
                 yt, yp = avail[raw]
                 curves.append({"label": label, "short": short, "color": color,
-                               "linestyle": ls, "y_true": yt, "y_proba": yp})
+                               "linestyle": ls, "y_true": yt, "y_proba": yp,
+                               "auc": _stored_metric_median(raw, model, dataset)})
         return curves
 
     labels = {label for _, label, *_ in spec}
@@ -2266,14 +2298,16 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
         if "standard" in avail:
             yt, yp = avail["standard"]
             curves.append({"label": "Real", "short": "R", "color": real_color,
-                           "linestyle": "-", "y_true": yt, "y_proba": yp})
+                           "linestyle": "-", "y_true": yt, "y_proba": yp,
+                           "auc": _stored_metric_median("standard", model, dataset)})
         for nb in fhe_bits:
             raw = f"fhe_{nb}"
             if raw in avail:
                 yt, yp = avail[raw]
                 curves.append({"label": f"FHE {nb}-bit", "short": f"{nb}b",
                                "color": bit_colors[nb], "linestyle": "-",
-                               "y_true": yt, "y_proba": yp})
+                               "y_true": yt, "y_proba": yp,
+                               "auc": _stored_metric_median(raw, model, dataset)})
         return curves
 
     # Annotate only the anchors (Real + lowest/highest precision) to avoid a
@@ -2337,18 +2371,17 @@ def plot_roc_fhe_precision_multipanel(preds, save_dir=FIGURES_DIR, cfg=None,
 #
 # `radar.envelope` in config/visualization.yaml picks how each mode is drawn — one
 # figure per run either way, so flip it and re-run to compare:
-#   - false (default) : one polygon per mode, the mean over (dataset x model) cells,
+#   - false (default) : one polygon per mode, the median over (dataset x model) cells,
 #                       with short IQR whiskers at each vertex.
 #   - true            : that polygon replaced by a shaded p25-p75 band over those
 #                       cells (no centre line), exposing how much the cells disagree.
-# Real stays a single dashed mean in both. The envelope carries two caveats, both of
+# Real stays a single dashed median in both. The envelope carries two caveats, both of
 # which belong in the caption:
 #   (a) the band is a PER-AXIS quantile, so neither edge is a real (dataset, model)
 #       combination — it is an envelope, not a case;
-#   (b) radii are NOT comparable with the mean version. Both use the same normalisers,
-#       but the mean version fits their ranges to the mode means and the envelope to
-#       the quantiles it draws, which overshoot those means by 4-32% on the resource
-#       axes.
+#   (b) radii are NOT comparable with the median version. Both use the same
+#       normalisers, but the median version fits their ranges to the mode medians and
+#       the envelope to the quantiles it draws, which overshoot on the resource axes.
 
 # (column, short code, group) ordered by increasing display angle so the 5
 # performance axes fill the top semicircle (ROC-AUC at top centre) and the 4
@@ -2381,7 +2414,7 @@ _RADAR_DEFAULTS = {
     "perf_norm": "minmax",     # "minmax" (across shown modes) | "absolute" (fixed band)
     "fhe_n_bits": 8,
     "primary_synth": ["arf", "bayesian_network", "ctgan", "gaussian_copula", "nflow"],
-    "envelope": False,            # true -> shaded p25-p75 band instead of the mean
+    "envelope": False,            # true -> shaded p25-p75 band instead of the median
     "envelope_quantiles": (25, 75),
     "envelope_band_alpha": 0.12,
 }
@@ -2495,24 +2528,30 @@ def _radar_aggregate(mode_subs):
     For each mode, aggregate to one value per axis.
 
     Each (dataset, model) pair is one "cell"; within a cell, metric columns are
-    averaged over bootstrap iterations and resource columns are constant. The mode
-    value is the mean over cells (equal weight per cell). Per-cell arrays are kept
+    reduced over bootstrap iterations and resource columns are constant. The mode
+    value is the median over cells (equal weight per cell). Per-cell arrays are kept
     for the IQR spread band.
+
+    Both reductions are MEDIANS, matching every other figure and the manuscript
+    (see aggregate_metrics_csv in src/utils.py). This is what the radar used to
+    break: it was the one figure aggregating with means, so its resource axes were
+    normalised against CTGAN's contention-inflated fit time rather than its typical
+    one.
     """
     cols = [c for c, _, _ in _RADAR_AXES]
-    means, cells = {}, {}
+    medians, cells = {}, {}
     for key, sub in mode_subs:
-        cell_means = sub.groupby(["dataset", "model"])[cols].mean()
-        cells[key] = {c: cell_means[c].to_numpy(dtype=float) for c in cols}
-        means[key] = {c: float(cell_means[c].mean()) for c in cols}
-    return means, cells
+        cell_medians = sub.groupby(["dataset", "model"])[cols].median()
+        cells[key] = {c: cell_medians[c].to_numpy(dtype=float) for c in cols}
+        medians[key] = {c: float(cell_medians[c].median()) for c in cols}
+    return medians, cells
 
 
 def _radar_cell_quantile(cells, q):
     """
     {mode_key: {col: value}} at percentile ``q`` over the (dataset, model) cells.
 
-    Shaped exactly like the ``means`` dict from _radar_aggregate, so the same
+    Shaped exactly like the ``medians`` dict from _radar_aggregate, so the same
     normalisation loop applies to either. Empty/all-NaN columns yield NaN, which the
     drawing code already tolerates.
 
@@ -2530,7 +2569,7 @@ def _radar_cell_quantile(cells, q):
     return out
 
 
-def _radar_axis_transforms(means, rcfg):
+def _radar_axis_transforms(mode_values, rcfg):
     """
     Build one normaliser per axis (col -> callable mapping a value/array to [0,1]).
 
@@ -2542,7 +2581,7 @@ def _radar_axis_transforms(means, rcfg):
       - "minmax": per-axis min-max across the shown modes (higher -> larger radius),
         which maximises the visible contrast between modes at the cost of absolute
         meaning (best shown mode always reaches the rim).
-    The across-mode min/max come from the mode means, so per-cell values (spread
+    The across-mode min/max come from the mode medians, so per-cell values (spread
     band) reuse the same scale and may clip at the ends, which is fine.
     """
     band_lo, band_hi = rcfg["perf_band"]
@@ -2553,8 +2592,8 @@ def _radar_axis_transforms(means, rcfg):
         return np.clip((v - band_lo) / (band_hi - band_lo), 0.0, 1.0)
 
     def _minmax_across_modes(col, invert, use_log):
-        """A min-max normaliser over the shown modes' means for one column."""
-        vals = np.array([means[k][col] for k in means], dtype=float)
+        """A min-max normaliser over the shown modes' medians for one column."""
+        vals = np.array([mode_values[k][col] for k in mode_values], dtype=float)
         vals = vals[np.isfinite(vals) & ((vals > 0) if use_log else True)]
         if vals.size < 2:
             return lambda v: np.full(np.shape(v), 0.5)
@@ -2620,7 +2659,7 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles, values_band=No
     # angular extent (padded by half a step on each side) so the wash follows the
     # group even though the axes are spaced evenly around the whole circle. Drawn as
     # explicit wedges (centre -> rim -> arc -> rim -> centre) for version-stable
-    # rendering. Only for the mean variant: under a shaded band these stack into mud,
+    # rendering. Only for the median variant: under a shaded band these stack into mud,
     # so the envelope panels keep a plain grey grid instead.
     if values_band is None:
         perf_c, res_c = rcfg["perf_color"], rcfg["resource_color"]
@@ -2669,7 +2708,7 @@ def _draw_radar_panel(ax, values, baseline, spread, rcfg, angles, values_band=No
                 ax.plot([ang, ang], [l, h], color=poly_c, lw=1.0,
                         alpha=0.28, zorder=3, solid_capstyle="round")
 
-    # Real baseline reference: the mean, dashed, no fill, in the standard-mode colour
+    # Real baseline reference: the median, dashed, no fill, in the standard-mode colour
     if baseline is not None:
         b = np.concatenate([baseline, baseline[:1]])
         ax.plot(theta, b, color=base_c, lw=1.5, linestyle=(0, (4, 2)),
@@ -2711,21 +2750,21 @@ def plot_radar_overview_multipanel(
     ``radar.envelope`` picks how each mode is drawn:
 
     false (default)
-        One polygon per mode: the mean over (dataset x model) cells, with short
+        One polygon per mode: the median over (dataset x model) cells, with short
         radial IQR whiskers at the vertices.
 
     true
         A shaded band between the two ``radar.envelope_quantiles`` (p25-p75) over
         those same cells, with no centre line, exposing how much the cells disagree.
-        Real stays the single dashed mean either way, so there is one reference line
-        to read every mode against.
+        Real stays the single dashed median either way, so there is one reference
+        line to read every mode against.
 
         Two notes, both of which belong in the caption. The band is a PER-AXIS
         quantile, so neither edge is a real (dataset, model) combination. And radii
-        are not comparable with the mean version: both apply the same normalisers,
-        but the mean version fits their ranges to the mode means while the envelope
-        fits to the quantiles it draws (which overshoot those means by 4-32% on the
-        resource axes, enough to pin FHE at the centre and Real at the rim).
+        are not comparable with the median version: both apply the same normalisers,
+        but the median version fits their ranges to the mode medians while the
+        envelope fits to the quantiles it draws, which overshoot on the resource
+        axes enough to pin FHE at the centre and Real at the rim.
 
     Saved as: radar_overview_multipanel.{fmt}
     """
@@ -2745,7 +2784,7 @@ def plot_radar_overview_multipanel(
     if len(mode_subs) < 2:
         return
 
-    means, cells = _radar_aggregate(mode_subs)
+    mode_medians, cells = _radar_aggregate(mode_subs)
 
     raw_q = None
     if envelope:
@@ -2753,14 +2792,14 @@ def plot_radar_overview_multipanel(
                  for name, q in zip(("lo", "hi"), rcfg["envelope_quantiles"])}
 
     # Both variants use the same normalisers (perf_norm for the top half, log minmax
-    # inverted for the bottom); only the range they are fitted to differs. The mean
-    # figure fits to the mode means, which the envelope's quantile edges overshoot
-    # (4-32% on the resource axes) — enough to pin the cheapest and most expensive
-    # modes to the rim and the centre. So fit to the values actually drawn:
+    # inverted for the bottom); only the range they are fitted to differs. The median
+    # figure fits to the mode medians, which the envelope's quantile edges overshoot
+    # on the resource axes — enough to pin the cheapest and most expensive modes to
+    # the rim and the centre. So fit to the values actually drawn:
     # _minmax_across_modes only iterates the dict it is handed, so passing the
     # quantile edges keyed per (mode, quantile) widens the range without touching
     # _radar_axis_transforms.
-    scale_src = means
+    scale_src = mode_medians
     if envelope:
         scale_src = {f"{k}@{name}": d[k] for name, d in raw_q.items() for k in d}
     transforms = _radar_axis_transforms(scale_src, rcfg)
@@ -2770,15 +2809,15 @@ def plot_radar_overview_multipanel(
         return {k: [float(transforms[c](per_mode[k][c])) for c in cols]
                 for k in per_mode}
 
-    norm_mean = _normalise(means)
+    norm_median = _normalise(mode_medians)
 
     # Envelope variant: both edges go through the very same per-axis transforms, so
-    # they share one scale. The mean variant instead keeps its vertex whiskers.
+    # they share one scale. The median variant instead keeps its vertex whiskers.
     norm_q = {n: _normalise(d) for n, d in raw_q.items()} if envelope else None
 
 
     norm_spread = {}
-    for key in ([] if envelope else means):
+    for key in ([] if envelope else mode_medians):
         lo, hi = [], []
         for c in cols:
             arr = np.asarray(transforms[c](cells[key][c]), dtype=float)
@@ -2795,8 +2834,8 @@ def plot_radar_overview_multipanel(
     label_map, _color_map, _group_map = _build_mode_display(cfg, raw_keys)
     # Real (standard) is the dashed reference on every panel, not its own panel, drawn
     # in the standard-mode colour (green) for continuity with the other figures. It is
-    # always the mean, in both variants — one clean reference line to read against.
-    baseline_vec = norm_mean.get("standard")
+    # always the median, in both variants — one clean reference line to read against.
+    baseline_vec = norm_median.get("standard")
     rcfg["baseline_color"] = _mode_color(cfg, "standard")
     panel_keys = [k for k in raw_keys if k != "standard"]
     angles = np.deg2rad(_RADAR_ANGLES_DEG)
@@ -2819,7 +2858,7 @@ def plot_radar_overview_multipanel(
         # The envelope variant is the band alone: no centre line, and the whiskers
         # would be redundant with the band anyway.
         spread = norm_spread.get(key) if show_spread else None
-        _draw_radar_panel(ax, None if envelope else norm_mean[key],
+        _draw_radar_panel(ax, None if envelope else norm_median[key],
                           baseline_vec, spread, rcfg, angles,
                           values_band=(norm_q["lo"][key], norm_q["hi"][key])
                           if envelope else None)
@@ -2836,7 +2875,7 @@ def plot_radar_overview_multipanel(
         real_label = label_map.get("standard", "Real")
         handles = [Line2D([0], [0], color=rcfg["baseline_color"], lw=1.5,
                           linestyle=(0, (4, 2)),
-                          label=f"{real_label} (mean)" if envelope else real_label)]
+                          label=f"{real_label} (median)" if envelope else real_label)]
         if envelope:
             from matplotlib.patches import Patch
             from matplotlib.colors import to_rgba

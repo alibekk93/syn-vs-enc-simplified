@@ -446,9 +446,16 @@ def aggregate_metrics_csv(
     (fhe_2, fhe_12, ...) are kept as distinct mode values rather than collapsed
     into a shared method name.
 
-    Each metric gets three columns — `{metric}_mean`, `{metric}_ci_low`,
+    Each metric gets three columns — `{metric}_median`, `{metric}_ci_low`,
     `{metric}_ci_high` — computed from that file's n=1000 bootstrap distribution:
-    the mean, and the 95% CI via the 2.5th/97.5th percentiles.
+    the median, and the 95% CI via the 2.5th/97.5th percentiles.
+
+    The point estimate is the MEDIAN, project-wide: every figure, table, and
+    manuscript sentence aggregates with medians (see tmp/manuscript/results_summary.md).
+    Resource costs are single measurements with a heavy right tail from cluster
+    contention, and bootstrap replicate distributions are mildly left-skewed, so a
+    mean summarises neither well. The percentile CI is unchanged and pairs naturally
+    with a median.
 
     The matching resource profile in `profiles_dir` (`{mode}__{model}__{dataset}.json`,
     as written by ResourceProfiler.save) contributes the scalar
@@ -457,7 +464,7 @@ def aggregate_metrics_csv(
     """
     fieldnames = ["mode", "dataset", "model"]
     for metric in _METRICS_CSV_METRIC_NAMES:
-        fieldnames += [f"{metric}_mean", f"{metric}_ci_low", f"{metric}_ci_high"]
+        fieldnames += [f"{metric}_median", f"{metric}_ci_low", f"{metric}_ci_high"]
     fieldnames += _METRICS_CSV_RESOURCE_COLUMNS
 
     profiles_path = Path(profiles_dir)
@@ -476,14 +483,14 @@ def aggregate_metrics_csv(
         for metric in _METRICS_CSV_METRIC_NAMES:
             values = metrics.get(metric)
             if not values:
-                row[f"{metric}_mean"] = None
+                row[f"{metric}_median"] = None
                 row[f"{metric}_ci_low"] = None
                 row[f"{metric}_ci_high"] = None
                 continue
 
             arr = np.asarray(values, dtype=float)
             ci_low, ci_high = np.percentile(arr, [2.5, 97.5])
-            row[f"{metric}_mean"] = round(float(arr.mean()), 4)
+            row[f"{metric}_median"] = round(float(np.median(arr)), 4)
             row[f"{metric}_ci_low"] = round(float(ci_low), 4)
             row[f"{metric}_ci_high"] = round(float(ci_high), 4)
 

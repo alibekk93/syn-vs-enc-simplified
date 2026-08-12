@@ -148,6 +148,9 @@ violinplot:
   # `box` draws a miniature box-and-whisker with a white median dot, which reads at
   # a glance in a 1in-tall panel. `quartile` draws three dashed lines that turn into
   # noise once each violin is only ~0.4in wide.
+  # Either way the marked centre is the MEDIAN, which is the project-wide point
+  # estimate (see aggregate_metrics_csv in src/utils.py), so the dot inside a violin
+  # and the number in the tables are the same statistic.
   # NOTE: switching this away from `quartile` invalidates the sentence in the
   # manuscript caption that describes the inner lines as quartiles.
   inner: "box"             # box | quartile | point | stick | None
@@ -233,12 +236,12 @@ radar:
   perf_band: [0.5, 1.0]        # radial band when perf_norm: absolute
   fhe_n_bits: 8                # which FHE bit-width gets a panel
   primary_synth: [arf, bayesian_network, ctgan, gaussian_copula, nflow]
-  # Variability variant. false: each mode is its mean polygon plus IQR whiskers.
+  # Variability variant. false: each mode is its median polygon plus IQR whiskers.
   # true: each mode becomes a shaded p25-p75 band over the (dataset x model) cells
-  # with no centre line. Real is the dashed mean either way. One figure per run —
+  # with no centre line. Real is the dashed median either way. One figure per run —
   # flip this and re-run to compare. Radii are not comparable between the two: the
-  # mean version fits its min-max ranges to the mode means, the envelope to the
-  # quantiles it draws (which overshoot by 4-32% on the resource axes).
+  # median version fits its min-max ranges to the mode medians, the envelope to the
+  # quantiles it draws (which overshoot on the resource axes).
   envelope: false
   envelope_quantiles: [25, 75]   # the two band edges
   envelope_band_alpha: 0.12      # band fill opacity

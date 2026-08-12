@@ -90,7 +90,7 @@ _OUTPUT_FIELDS = [
     "dataset", "model", "metric", "comparison",
     "mode_a", "mode_b",
     "n_valid", "n_ties", "tie_rule", "side",
-    "mean_a", "mean_b", "mean_diff",
+    "median_a", "median_b", "median_diff",
     "ci_low", "ci_high",
     "margin", "p_diff", "p_one_sided", "p_noninf", "p_equiv",
     "test_type", "p_value", "p_holm", "family_size", "significant_holm",
@@ -315,7 +315,7 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
     """
     out = {
         "n_valid": 0, "n_ties": None, "tie_rule": tie_rule, "side": side,
-        "mean_a": None, "mean_b": None, "mean_diff": None,
+        "median_a": None, "median_b": None, "median_diff": None,
         "ci_low": None, "ci_high": None,
         "margin": margin,
         "p_diff": None, "p_one_sided": None, "p_noninf": None, "p_equiv": None,
@@ -368,11 +368,20 @@ def paired_bootstrap_test(a: np.ndarray, b: np.ndarray,
         p_one_sided = 1.0 if b_os <= 0 else min(1.0, (r_os + 1) / (b_os + 1))
 
     ci_low, ci_high = np.percentile(d, [2.5, 97.5])
+    # Point estimates are MEDIANS, matching the project-wide convention (see
+    # aggregate_metrics_csv in utils.py). Two notes for anyone reading a row:
+    #   * median_diff is the median of the PAIRED differences, not
+    #     median_a - median_b. Medians are not additive, so those two disagree.
+    #     The paired median is the right one: it is the location the ASL below
+    #     actually tests, since that ASL is a sign statistic on d.
+    #   * Switching the point estimate from mean to median changes NO p-value.
+    #     p_diff and p_one_sided are built from counts of d>0, d<0 and ties, so
+    #     every Holm adjustment and every significance verdict is unaffected.
     out.update(
         n_ties=n_tie,
-        mean_a=round(float(av.mean()), 4),
-        mean_b=round(float(bv.mean()), 4),
-        mean_diff=round(float(d.mean()), 4),
+        median_a=round(float(np.median(av)), 4),
+        median_b=round(float(np.median(bv)), 4),
+        median_diff=round(float(np.median(d)), 4),
         ci_low=round(float(ci_low), 4),
         ci_high=round(float(ci_high), 4),
         # 6dp: the 2/1001 floor needs the resolution to stay distinguishable.
@@ -545,7 +554,7 @@ def run_pairwise_tests(
                         continue
 
                     result = paired_bootstrap_test(a, b, tie_rule=tie_rule, margin=margin, side=side)
-                    diff = result["mean_diff"]
+                    diff = result["median_diff"]
                     row = {
                         "dataset": dataset,
                         "model": model,
@@ -623,14 +632,14 @@ def write_stats_markdown(rows: list[dict], output_path: str) -> None:
                 f"{row['comparison']} design, {row['test_type']} test, "
                 f"Holm family n={row['family_size']})",
                 "",
-                "| mode_a | mode_b | mean_a | mean_b | diff | 95% CI | ties | "
+                "| mode_a | mode_b | median_a | median_b | paired median diff | 95% CI | ties | "
                 "p_diff | p_1sided | p_noninf | p_equiv | p_holm | sig |",
                 "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
             ]
         ci = "—" if row["ci_low"] is None else f"[{row['ci_low']}, {row['ci_high']}]"
         lines.append(
-            f"| {row['mode_a']} | {row['mode_b']} | {fmt(row['mean_a'])} | "
-            f"{fmt(row['mean_b'])} | {fmt(row['mean_diff'])} | {ci} | "
+            f"| {row['mode_a']} | {row['mode_b']} | {fmt(row['median_a'])} | "
+            f"{fmt(row['median_b'])} | {fmt(row['median_diff'])} | {ci} | "
             f"{fmt(row['n_ties'])} | {fmt(row['p_diff'])} | {fmt(row['p_one_sided'])} | "
             f"{fmt(row['p_noninf'])} | "
             f"{fmt(row['p_equiv'])} | {fmt(row['p_holm'])} | "
