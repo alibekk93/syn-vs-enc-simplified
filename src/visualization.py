@@ -12,7 +12,12 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-from src.utils import parse_filename_metadata
+from src.utils import (
+    _extract_resource_columns,
+    join_stage_columns,
+    load_stage_profiles,
+    parse_filename_metadata,
+)
 
 FIGURES_DIR = Path("results/figures")
 BOOTSTRAP_PATH = "results/internal_validation_bootstrap/aggregated.json"
@@ -150,31 +155,27 @@ def load_simple_bootstrap(
                 **{k: v[i] for k, v in metrics.items() if isinstance(v, list) and i < len(v)},
             })
 
+    # The stage profiles (generator fit, synthetic draw, preprocessing) have no
+    # metrics file, so the how="left" merge below drops them. Their costs are joined
+    # onto the classifier rows that inherit them instead, by the same helper
+    # aggregate_metrics_csv uses, so the figures and the CSV cannot diverge.
+    stages = load_stage_profiles(profiles_dir)
+
     profile_records = []
     for path in Path(profiles_dir).glob("*.json"):
         data = _load_json_first(path)
         meta = parse_filename_metadata(path.name)
+        # Timing sourced from CPU time (contention-robust on the shared cluster),
+        # not wall clock. See _extract_resource_columns.
+        resources = _extract_resource_columns(data)
         profile_records.append({
             "mode": meta["mode"],
             "n_bits": meta["n_bits"],
             "synth_scale": meta["synth_scale"],
             "model": meta["model"],
             "dataset": meta["dataset"],
-            # Timing sourced from CPU time (contention-robust on the shared
-            # cluster), not wall clock. See _extract_resource_columns.
-            "train_time": sum(data.get("training_cpu_time", {}).values()),
-            "synth_fit_time": data.get("training_cpu_time", {}).get("synthesis_fit"),
-            "fhe_fit_time": data.get("training_cpu_time", {}).get("training_fit"),
-            "fhe_compile_time": data.get("training_cpu_time", {}).get("training_compile"),
-            "inf_time_total": data.get("inference_time", {}).get("cpu_total"),
-            "inf_time_per_sample": data.get("inference_time", {}).get("cpu_per_sample"),
-            "mem_train_avg": data.get("memory", {}).get("training", {}).get("average_mb"),
-            "mem_train_peak": data.get("memory", {}).get("training", {}).get("peak_mb"),
-            "mem_inf_avg": data.get("memory", {}).get("inference", {}).get("average_mb"),
-            "mem_inf_peak": data.get("memory", {}).get("inference", {}).get("peak_mb"),
-            "model_size_mb": data.get("storage", {}).get("model_size_mb"),
-            "data_size_mb": data.get("storage", {}).get("data_size_mb"),
-            "circuit_complexity": data.get("fhe", {}).get("circuit_complexity"),
+            **resources,
+            **join_stage_columns(meta, resources["train_time"], stages),
         })
 
     metrics_df = pd.DataFrame(metric_records)
@@ -2395,7 +2396,7 @@ _RADAR_AXES = [
     ("recall",              "Rec",     "perf"),      # 162
     ("mem_train_peak",      "Tr mem",  "resource"),  # 210
     ("mem_inf_peak",        "Inf mem", "resource"),  # 250
-    ("train_time",          "Train t", "resource"),  # 290
+    ("one_time_cost",       "Train t", "resource"),  # 290
     ("inf_time_per_sample", "Inf t",   "resource"),  # 330
 ]
 
@@ -2427,70 +2428,21 @@ def _radar_cfg(cfg):
     return d
 
 
-def _radar_synth_offsets(profiles_dir=None):
+def _radar_synth_sub(df, m):
     """
-    Per-(mode, dataset) one-time synthesis cost to fold into synthetic train_time:
-    the synthesizer fit plus the scale-100 sampling, in CPU seconds.
+    Rows for synthetic mode ``m`` at synth_scale=100.
 
-    These live in the standalone ``{synth}__synthesis__{dataset}`` and
-    ``{synth}_100__sampling__{dataset}`` resource profiles, which have no matching
-    metrics file. load_simple_bootstrap merges profiles onto metrics with how="left",
-    so those rows are dropped and never reach the radar dataframe — they must be
-    read straight from the profile JSONs.
-
-    Returns {(mode, dataset): fit_plus_sample_seconds}. Each value sums the timed
-    blocks of the fit and sampling stages, matching how every other mode's
-    train_time is built. Missing profiles simply contribute nothing.
-    """
-    if profiles_dir is None:
-        profiles_dir = _profiles_dir_from_config()
-
-    def _load(path):
-        content = Path(path).read_text().strip()
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError:      # tolerate trailing bytes, as load_simple_bootstrap does
-            obj, _ = json.JSONDecoder().raw_decode(content)
-            return obj
-
-    offsets = {}
-    for path in Path(profiles_dir).glob("*.json"):
-        meta = parse_filename_metadata(path.name)
-        model = meta.get("model")
-        if model not in ("synthesis", "sampling"):
-            continue
-        if model == "sampling" and meta.get("synth_scale") != 100:
-            continue                       # sampling counts only at scale 100
-        seconds = sum((_load(path).get("training_cpu_time") or {}).values())
-        key = (meta["mode"], meta["dataset"])
-        offsets[key] = offsets.get(key, 0.0) + seconds
-    return offsets
-
-
-def _radar_synth_train_sub(df, m, offsets):
-    """
-    Rows for synthetic mode ``m`` at synth_scale=100, with ``train_time`` redefined
-    to the full one-time cost of standing up the deployed synthetic model:
-
-        train_time = synthesizer fit + sampling(scale 100) + downstream training
-
-    ``offsets`` maps (mode, dataset) -> (fit + scale-100 sampling) CPU seconds, from
-    _radar_synth_offsets. The metrics-keyed dataframe cannot carry those stages (see
-    that helper), so they are added here. The generator is fit and sampled once per
-    dataset, so each is a dataset-level constant added to every classifier cell of
-    that dataset. This makes the synthetic "Train t" axis comparable to the FHE
-    panel, whose train_time already includes its one-time compile.
+    The full one-time cost of standing up the deployed synthetic model --
+    synthesizer fit + sampling(scale 100) + downstream training -- now arrives as the
+    ``one_time_cost`` column from src/utils.join_stage_columns, so this no longer has
+    to re-glob the profile JSONs and add the missing stages onto ``train_time`` by
+    hand. That column is comparable across modes: the FHE one already includes its
+    compile, and the standard one is just the classifier fit.
     """
     sel = df[(df["mode"] == m) & (df["synth_scale"] == 100)]
     # Defensive: under the current left-merge there are no "sampling" rows here,
     # but drop them if a future outer-merge dataframe ever includes them.
-    clf = sel[sel["model"] != "sampling"].copy()
-    if clf.empty:
-        return clf
-
-    extra = clf["dataset"].map(lambda d: float(offsets.get((m, d), 0.0)))
-    clf["train_time"] = clf["train_time"].astype(float) + extra
-    return clf
+    return sel[sel["model"] != "sampling"]
 
 
 def _radar_select_modes(df, rcfg):
@@ -2500,18 +2452,17 @@ def _radar_select_modes(df, rcfg):
     bit-width. Mirrors the canonical _sort_raw_keys ordering. Modes with no rows
     are skipped so the figure degrades gracefully on a partial results set.
 
-    Synthetic subframes have ``train_time`` redefined by _radar_synth_train_sub to
-    the full one-time cost (synthesizer fit + scale-100 sampling + downstream
-    classifier fit), not just the downstream classifier fit.
+    Every subframe carries ``one_time_cost``, the full cost of standing up the
+    deployed model (synthesizer fit + scale-100 sampling + downstream classifier fit
+    for the synthetic modes, fit + compile for FHE, classifier fit for standard).
     """
     out = []
     real = df[df["mode"] == "standard"]
     if not real.empty:
         out.append(("standard", real))
 
-    synth_offsets = _radar_synth_offsets()
     for m in sorted(rcfg["primary_synth"]):
-        sub = _radar_synth_train_sub(df, m, synth_offsets)
+        sub = _radar_synth_sub(df, m)
         if not sub.empty:
             out.append((m, sub))
 

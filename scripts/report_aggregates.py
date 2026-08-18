@@ -182,7 +182,7 @@ def cost(df, **_):
     rows = []
     for key, sub in _radar_select_modes(df, rcfg):
         cells = sub.groupby(["dataset", "model"])
-        one_time = cells["train_time"].median()
+        one_time = cells["one_time_cost"].median()
         rows.append([
             key,
             _f(one_time.median(), 2),

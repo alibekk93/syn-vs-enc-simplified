@@ -23,7 +23,6 @@ Usage:
 """
 
 import sys
-from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -32,11 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.report_aggregates import EXCLUDED_DATASETS, GENERATORS, MODELS, N_BITS
 from src.utils import parse_filename_metadata
-from src.visualization import _load_viz_config, _radar_cfg, _radar_synth_offsets
-
-# _radar_synth_offsets re-globs all 762 profile JSONs per call and tab:cost needs it twelve
-# times (once to sort the generators, once to render each row).
-_offsets = lru_cache(_radar_synth_offsets)
+from src.visualization import _load_viz_config, _radar_cfg
 
 AGGREGATED = "results/metrics_aggregated.csv"
 STATS_DIR = "results/stats"
@@ -146,17 +141,11 @@ def _one_time(df, mode):
     """
     Everything paid before the first prediction, per (dataset, classifier) cell.
 
-    For the synthetic modes that is the generator fit plus scale-100 sampling plus the
-    downstream classifier fit. The first two stages have no metrics file, so they are
-    absent from the aggregated CSV and come from the same profile-level helper the radar
-    figure uses; the generator is fit once per dataset, so its cost is a dataset-level
-    constant added to every classifier cell.
+    Read straight off the aggregated CSV now that src/utils.join_stage_columns derives
+    it there for every mode: the generator fit and the synthetic draw used to be missing
+    from the CSV, so this had to re-glob the profile JSONs and re-add them by hand.
     """
-    sub = df[df["mode"] == mode]
-    generator = parse_filename_metadata(mode)["mode"]
-    offsets = _offsets()
-    extra = sub["dataset"].map(lambda d: offsets.get((generator, d), 0.0))
-    return sub["train_time"] + extra
+    return df[df["mode"] == mode]["one_time_cost"]
 
 
 def cost(df):

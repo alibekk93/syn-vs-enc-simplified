@@ -170,6 +170,7 @@ def parse_filename_metadata(filename):
         ctgan_100__rf__diabetes.json                    → mode=ctgan, synth_scale=100
         standard__rf__diabetes.json                     → mode=standard
         ctgan                                           → mode=ctgan  (bare JSON mode key)
+        preprocessing__diabetes.json                    → mode=preprocessing, dataset=diabetes
     """
     name = Path(filename).stem
     parts = name.split("__")
@@ -201,6 +202,11 @@ def parse_filename_metadata(filename):
     if len(parts) >= 3:
         meta["model"] = parts[1]
         meta["dataset"] = parts[2]
+    elif len(parts) == 2:
+        # Stage profiles with no model slot, i.e. preprocessing__{dataset}. The
+        # dataset used to come back None here, which is why preprocessing costs
+        # could not be joined onto anything.
+        meta["dataset"] = parts[1]
 
     return meta
 
@@ -398,6 +404,20 @@ _METRICS_CSV_RESOURCE_COLUMNS = [
     "circuit_complexity",
 ]
 
+# Stage columns, joined from the profiles that have no metrics file of their own.
+# Appended after the per-run columns above so the existing column order is intact.
+_METRICS_CSV_STAGE_COLUMNS = [
+    "synth_stage_time",
+    "synth_sample_time",
+    "mem_synth_peak",
+    "mem_sample_peak",
+    "preprocess_time",
+    "mem_preprocess_peak",
+    "one_time_cost",
+]
+
+_METRICS_CSV_ALL_RESOURCE_COLUMNS = _METRICS_CSV_RESOURCE_COLUMNS + _METRICS_CSV_STAGE_COLUMNS
+
 
 def _extract_resource_columns(profile: dict) -> dict:
     """Flatten a resource-profile JSON (as written by ResourceProfiler.save) into
@@ -418,7 +438,10 @@ def _extract_resource_columns(profile: dict) -> dict:
         # train_time sums every timed training block (fit, compile, ...) in CPU
         # seconds, matching the aggregation in src/visualization.py.
         "train_time":          round(sum(training_cpu_time.values()), 4) if training_cpu_time else None,
-        "synth_fit_time":      training_cpu_time.get("synthesis_fit"),
+        # Left None here on purpose: synthesis_fit is timed in the generator's own
+        # profile, never in a classifier's, so this read was always returning None
+        # and the column sat empty on every row. join_stage_columns fills it.
+        "synth_fit_time":      None,
         "fhe_fit_time":        training_cpu_time.get("training_fit"),
         "fhe_compile_time":    training_cpu_time.get("training_compile"),
         "inf_time_total":      inference_time.get("cpu_total"),
@@ -430,6 +453,108 @@ def _extract_resource_columns(profile: dict) -> dict:
         "model_size_mb":       storage.get("model_size_mb"),
         "data_size_mb":        storage.get("data_size_mb"),
         "circuit_complexity":  fhe.get("circuit_complexity"),
+    }
+
+
+def _load_profile_json(path):
+    """Load the first complete JSON object in a profile file, ignoring trailing bytes."""
+    content = Path(path).read_text(encoding="utf-8").strip()
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        obj, _ = json.JSONDecoder().raw_decode(content)
+        return obj
+
+
+def load_stage_profiles(profiles_dir: str = "results/resource_profiles") -> dict:
+    """
+    Costs of the pipeline stages that produce no metrics file of their own.
+
+    Both readers of the profile directory look a profile up by the exact name of a
+    (mode, model, dataset) run, so the stages that are not a classifier run were
+    dropped on the floor: the generator fit (`{gen}__synthesis__{ds}.json`), the draw
+    of the synthetic training set (`{gen}_{scale}__sampling__{ds}.json`), and
+    preprocessing (`preprocessing__{ds}.json`). That is why `synth_fit_time` was empty
+    on all 576 rows, and why the one-time cost of a synthetic mode had to be
+    reconstructed by re-globbing this directory at figure/table render time.
+
+    Timing is CPU seconds, matching _extract_resource_columns: the shared cluster's
+    wall clock absorbs node contention.
+
+    Returns {"synthesis": {(generator, dataset): {...}},
+             "sampling":  {(generator, scale, dataset): {...}},
+             "preprocessing": {dataset: {...}}}
+    """
+    stages = {"synthesis": {}, "sampling": {}, "preprocessing": {}}
+    profiles_path = Path(profiles_dir)
+    if not profiles_path.is_dir():
+        return stages
+
+    for path in sorted(profiles_path.glob("*.json")):
+        meta = parse_filename_metadata(path.name)
+        model, dataset = meta["model"], meta["dataset"]
+        if dataset is None:
+            continue
+        if model == "synthesis":
+            key, bucket, phase = (meta["mode"], dataset), "synthesis", "synthesis"
+        elif model == "sampling":
+            key, bucket, phase = (meta["mode"], meta["synth_scale"], dataset), "sampling", "sampling"
+        elif meta["mode"] == "preprocessing" and model is None:
+            key, bucket, phase = dataset, "preprocessing", "processing"
+        else:
+            continue
+
+        profile = _load_profile_json(path)
+        cpu_blocks = profile.get("training_cpu_time", {}) or {}
+        memory = (profile.get("memory", {}) or {}).get(phase, {}) or {}
+        stages[bucket][key] = {
+            # Every timed block of the stage, not just the headline one: loading the
+            # real data and persisting the fitted generator are also paid before the
+            # first prediction. This is the sum the radar figure has always used.
+            "cpu_time": round(sum(cpu_blocks.values()), 4) if cpu_blocks else None,
+            "fit_time": cpu_blocks.get("synthesis_fit"),
+            "mem_peak": memory.get("peak_mb"),
+        }
+    return stages
+
+
+def join_stage_columns(meta: dict, train_time, stages: dict) -> dict:
+    """
+    The `_METRICS_CSV_STAGE_COLUMNS` for one classifier row.
+
+    `meta` is that row's parsed filename metadata and `train_time` its own summed
+    training blocks. The generator is fit once per dataset and sampled once per
+    (dataset, scale), so each is a dataset-level constant charged to all three
+    downstream classifier cells -- the convention the radar figure established.
+
+    Sampling is matched on the row's OWN synth_scale rather than pinned to 100, so a
+    scale-300 row is charged the scale-300 draw it actually used.
+
+    `one_time_cost` is everything paid before the first prediction, one canonical
+    definition for every mode: classifier fit for standard, generator fit + draw +
+    classifier fit for the synthetic modes, and model fit + circuit compilation for
+    FHE (whose train_time already sums both, since they are timed in its own profile).
+    """
+    mode, dataset = meta["mode"], meta["dataset"]
+    synthesis = stages.get("synthesis", {}).get((mode, dataset), {})
+    sampling = stages.get("sampling", {}).get((mode, meta["synth_scale"], dataset), {})
+    preprocessing = stages.get("preprocessing", {}).get(dataset, {})
+
+    synth_stage_time = synthesis.get("cpu_time")
+    synth_sample_time = sampling.get("cpu_time")
+    one_time = None if train_time is None else float(train_time)
+    if one_time is not None:
+        one_time = round(one_time + (synth_stage_time or 0.0) + (synth_sample_time or 0.0), 4)
+
+    return {
+        "synth_fit_time": synthesis.get("fit_time"),
+        "synth_stage_time": synth_stage_time,
+        "synth_sample_time": synth_sample_time,
+        "mem_synth_peak": synthesis.get("mem_peak"),
+        "mem_sample_peak": sampling.get("mem_peak"),
+        "preprocess_time": preprocessing.get("cpu_time"),
+        "mem_preprocess_peak": preprocessing.get("mem_peak"),
+        "one_time_cost": one_time,
     }
 
 
@@ -461,13 +586,22 @@ def aggregate_metrics_csv(
     as written by ResourceProfiler.save) contributes the scalar
     `_METRICS_CSV_RESOURCE_COLUMNS` on the same row. Rows with no profile file get
     None for every resource column.
+
+    The stages that write a profile but no metrics file -- the generator fit, the
+    synthetic draw, preprocessing -- are joined on as `_METRICS_CSV_STAGE_COLUMNS` by
+    load_stage_profiles/join_stage_columns, as extra COLUMNS on the classifier rows
+    that inherit those costs rather than as extra rows. Extra rows would land inside
+    the `df[df["mode"] == m]` filters that scripts/render_tables.py medians over and
+    silently shift the published numbers; the row grain stays one per
+    (mode, dataset, classifier).
     """
     fieldnames = ["mode", "dataset", "model"]
     for metric in _METRICS_CSV_METRIC_NAMES:
         fieldnames += [f"{metric}_median", f"{metric}_ci_low", f"{metric}_ci_high"]
-    fieldnames += _METRICS_CSV_RESOURCE_COLUMNS
+    fieldnames += _METRICS_CSV_ALL_RESOURCE_COLUMNS
 
     profiles_path = Path(profiles_dir)
+    stages = load_stage_profiles(profiles_dir)
     rows = []
     for path in sorted(Path(metrics_dir).glob("*.json")):
         parts = path.stem.split("__")
@@ -496,11 +630,16 @@ def aggregate_metrics_csv(
 
         profile_path = profiles_path / f"{mode}__{model}__{dataset}.json"
         if profile_path.exists():
-            profile = json.loads(profile_path.read_text(encoding="utf-8"))
+            profile = _load_profile_json(profile_path)
             row.update(_extract_resource_columns(profile))
         else:
             logger.warning(f"No resource profile for {mode}/{model}/{dataset}: {profile_path.name}")
             row.update({col: None for col in _METRICS_CSV_RESOURCE_COLUMNS})
+
+        # After the per-run columns: this fills synth_fit_time, which no classifier
+        # profile can supply, and derives one_time_cost from that row's train_time.
+        row.update(join_stage_columns(parse_filename_metadata(path.name),
+                                      row.get("train_time"), stages))
 
         rows.append(row)
 
