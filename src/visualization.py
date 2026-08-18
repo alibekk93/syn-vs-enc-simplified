@@ -2393,10 +2393,10 @@ _RADAR_AXES = [
     ("roc_auc",             "AUC",     "perf"),      # 90  (top centre)
     ("precision",           "Prec",    "perf"),      # 126
     ("recall",              "Rec",     "perf"),      # 162
-    ("mem_train_peak",      "Tr mem",  "resource"),  # 202.5
-    ("mem_inf_peak",        "Inf mem", "resource"),  # 247.5
-    ("inf_time_per_sample", "Inf t",   "resource"),  # 292.5
-    ("train_time",          "Train t", "resource"),  # 337.5
+    ("mem_train_peak",      "Tr mem",  "resource"),  # 210
+    ("mem_inf_peak",        "Inf mem", "resource"),  # 250
+    ("train_time",          "Train t", "resource"),  # 290
+    ("inf_time_per_sample", "Inf t",   "resource"),  # 330
 ]
 
 # All 9 axes evenly spaced (40 deg apart). ROC-AUC sits at the top (90 deg); the
