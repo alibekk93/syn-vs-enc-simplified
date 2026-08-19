@@ -178,6 +178,11 @@ def cost(df, **_):
           "the synthetic modes, model fit + circuit compilation for FHE. Means are "
           "shown alongside only to expose the contention outliers; the median is the "
           "reported number.\n")
+    print("The three component columns are the stages one-time cost is built from, for "
+          "the prose in Section 4.2 that used to be typed by hand from the profile "
+          "JSONs. Each is a median in its own right, so they need not add exactly to "
+          "the one-time median. They are n/a for standard and FHE, which run no "
+          "generator.\n")
     rcfg = _radar_cfg(_load_viz_config())
     rows = []
     for key, sub in _radar_select_modes(df, rcfg):
@@ -187,12 +192,16 @@ def cost(df, **_):
             key,
             _f(one_time.median(), 2),
             _f(one_time.mean(), 2),
+            _f(cells["synth_stage_time"].median().median()),
+            _f(cells["synth_sample_time"].median().median()),
+            _f(cells["train_time"].median().median()),
             f"{cells['inf_time_per_sample'].median().median():.3g}",
             _f(cells["mem_inf_peak"].median().median(), 0),
             _f(cells["model_size_mb"].median().median(), 2),
         ])
-    print(_table(["mode", "one-time (s)", "[mean]", "per-query (s/sample)",
-                  "peak inf. mem (MB)", "artifact (MB)"], rows), "\n")
+    print(_table(["mode", "one-time (s)", "[mean]", "gen fit (s)", "sampling (s)",
+                  "clf fit (s)", "per-query (s/sample)", "peak inf. mem (MB)",
+                  "artifact (MB)"], rows), "\n")
 
 
 def gaps(_df, replicates=None, **__):
