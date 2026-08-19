@@ -137,28 +137,44 @@ def fhe(df):
                *(_secs(s["inf_time_per_sample"].median()) for s in plain)))
 
 
-def _one_time(df, mode):
+def _cost_cells(sub):
     """
-    Everything paid before the first prediction, per (dataset, classifier) cell.
+    The four cost columns of tab:cost for one selection of rows.
 
-    Read straight off the aggregated CSV now that src/utils.join_stage_columns derives
-    it there for every mode: the generator fit and the synthetic draw used to be missing
-    from the CSV, so this had to re-glob the profile JSONs and re-add them by hand.
+    one_time_cost is everything paid before the first prediction, derived per row by
+    src/utils.join_stage_columns; before that existed this had to re-glob the profile
+    JSONs to recover the generator fit and the synthetic draw.
     """
-    return df[df["mode"] == mode]["one_time_cost"]
+    return (f"{sub['one_time_cost'].median():.2f}",
+            _secs(sub["inf_time_per_sample"].median()),
+            _mb(sub["mem_inf_peak"].median()),
+            f"{sub['model_size_mb'].median():.2f}")
 
 
 def cost(df):
-    """tab:cost: system cost by mode at the two pinned operating points."""
-    generators = sorted(GENERATORS, key=lambda g: _one_time(df, f"{g}_{SYNTH_SCALE}").median())
+    """
+    tab:cost: system cost by mode and classifier at the two pinned operating points.
+
+    Each mode gets a median row over its 18 cells followed by one row per classifier.
+    The per-classifier rows exist because for FHE the median is not a summary: encrypted
+    inference spans 0.0060 s to 11.17 s across the three classifiers, so the mode-level
+    3.00 s is simply whichever classifier sorts to the middle. The plaintext modes vary
+    little by classifier, and showing that is itself the point of contrast.
+    """
+    generators = sorted(GENERATORS,
+                        key=lambda g: df[df["mode"] == f"{g}_{SYNTH_SCALE}"]["one_time_cost"].median())
     modes = ["standard"] + [f"{g}_{SYNTH_SCALE}" for g in generators] + [f"fhe_{FHE_BITS}"]
-    for mode in modes:
+    for i, mode in enumerate(modes):
+        if i:
+            print(r"\addlinespace")
         sub = df[df["mode"] == mode]
-        print(_row(_mode_label(mode),
-                   f"{_one_time(df, mode).median():.2f}",
-                   _secs(sub["inf_time_per_sample"].median()),
-                   _mb(sub["mem_inf_peak"].median()),
-                   f"{sub['model_size_mb'].median():.2f}"))
+        # `\\*` forbids a page break after the row, so the longtable can only split
+        # between modes and never leaves a mode's classifiers stranded on two pages.
+        print(_row(_mode_label(mode), "Median", *_cost_cells(sub)) + "*")
+        rows = [(label, sub[sub["model"] == model]) for model, label in CLASSIFIERS.items()]
+        for j, (label, cell) in enumerate(rows):
+            last = j == len(rows) - 1
+            print(_row("", label, *_cost_cells(cell)) + ("" if last else "*"))
 
 
 def s2baseline(df):

@@ -26,6 +26,8 @@ Usage:
 import sys
 from pathlib import Path
 
+from decimal import Decimal, ROUND_HALF_UP
+
 import numpy as np
 import pandas as pd
 
@@ -86,7 +88,15 @@ def _cells(df, keys, column):
 def _f(x, n=3):
     # ASCII only: this prints to a Windows console under cp1252, where a dash or an
     # arrow raises UnicodeEncodeError and kills the whole report mid-table.
-    return "n/a" if x is None or (isinstance(x, float) and not np.isfinite(x)) else f"{x:.{n}f}"
+    #
+    # Rounds half away from zero, the scientific convention, rather than letting the
+    # float64 representation decide. A median of two 4-decimal measurements lands on an
+    # exact half often enough to matter: NFlow's downstream fit is (0.0278+0.0312)/2 =
+    # 0.0295 exactly, which f"{x:.3f}" renders 0.029 because the nearest double is
+    # 0.02949999..., disagreeing with the 0.030 in Section 4.2 for no real reason.
+    if x is None or (isinstance(x, float) and not np.isfinite(x)):
+        return "n/a"
+    return f"{Decimal(repr(float(x))).quantize(Decimal(1).scaleb(-n), ROUND_HALF_UP)}"
 
 
 # ---------------------------------------------------------------- sections
