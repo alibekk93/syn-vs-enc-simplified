@@ -15,7 +15,10 @@ Conventions, identical to report_aggregates.py and every figure:
   * paired gap      = median_diff in results/stats/*.csv, the median of the replicate-wise
                       differences. Not median_a - median_b: medians do not subtract;
   * cost            = CPU seconds (training_cpu_time / cpu_per_sample), never wall clock;
-  * nothing is pooled across synthesis scales or across quantization precisions.
+  * nothing is pooled across synthesis scales or across quantization precisions;
+  * bold            = the best cell of a metric column within its block, in the two tables
+                      that mark one (tab:s2baseline per dataset, tab:s3modes overall). See
+                      _bold_best for what "best" means when the medians tie.
 
 Usage:
     python scripts/render_tables.py                 # every body (see SECTIONS)
@@ -36,8 +39,9 @@ from src.visualization import _load_viz_config, _radar_cfg
 AGGREGATED = "results/metrics_aggregated.csv"
 STATS_DIR = "results/stats"
 
-# main.tex orders the metric columns Accuracy, Precision, Recall, F1, ROC-AUC, which is not
-# the storage order in the CSV.
+# The tables order the metric columns Accuracy, Precision, Recall, F1, ROC-AUC, which is not
+# the storage order in the CSV. tab:fhe and tab:cost are in main.tex; tab:s2baseline and
+# tab:s3modes are in supplementary.tex.
 TABLE_METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc"]
 
 # (full name, abbreviation) exactly as main.tex spells them. Ordered by dataset size, as
@@ -72,6 +76,40 @@ SYNTH_SCALE = 100
 def _ci(median, low, high, n=3):
     """`0.908 (0.880--0.934)`, the cell format used by tab:s2baseline and tab:s3modes."""
     return f"{median:.{n}f} ({low:.{n}f}--{high:.{n}f})"
+
+
+def _cell(median, low, high, n=3):
+    """
+    One cell of tab:s2baseline or tab:s3modes: its text and its ranking key.
+
+    Both come out of the same three numbers rounded the same way, so the precision a reader
+    sees and the precision _bold_best compares can never drift apart.
+    """
+    return _ci(median, low, high, n), (round(median, n), round(low, n), round(high, n))
+
+
+def _bold_best(block):
+    """
+    Bold the best cell of every metric column of one block, given row-major _cell pairs.
+
+    Returns the text alone, the winners wrapped whole, interval included, since that is the
+    unit the column is compared on.
+
+    The key carries the interval bounds after the median because the median alone does not
+    decide three columns of tab:s2baseline, where cells are equal at full float precision
+    rather than rounded into equality: accuracy on mammographic mass (RF and XGBoost, both
+    0.8238), F1 on diabetes (LR and RF, both 0.5591), and accuracy on heart disease (all
+    three classifiers, 0.8689). Among equal medians the higher lower bound wins, then the
+    higher upper bound; all three resolve on the lower bound alone. Anything still tied
+    after that is indistinguishable in every number printed, and all of it is bolded.
+    """
+    out = [[text for text, _ in row] for row in block]
+    for col in range(len(out[0])):
+        best = max(row[col][1] for row in block)
+        for i, row in enumerate(block):
+            if row[col][1] == best:
+                out[i][col] = rf"\textbf{{{out[i][col]}}}"
+    return out
 
 
 def _secs(x):
@@ -178,30 +216,46 @@ def cost(df):
 
 
 def s2baseline(df):
-    """tab:s2baseline: real-data baselines per dataset and classifier, all five metrics."""
+    """
+    tab:s2baseline: real-data baselines per dataset and classifier, all five metrics.
+
+    The dataset column is a \\multirow spanning the block's three classifier rows, so the
+    name is set once; the \\multirow and the first classifier row are one LaTeX row split
+    over two source lines. Each block is bolded on its own, the comparison being between
+    the three classifiers on one dataset.
+    """
     std = df[df["mode"] == "standard"]
     for i, (dataset, (name, _)) in enumerate(DATASETS.items()):
         if i:
             print(r"\addlinespace")
-        for model, label in CLASSIFIERS.items():
-            cell = std[(std["dataset"] == dataset) & (std["model"] == model)].iloc[0]
-            print(_row(name, f"{label:<7}",
-                       *(_ci(cell[f"{m}_median"], cell[f"{m}_ci_low"], cell[f"{m}_ci_high"])
-                         for m in TABLE_METRICS)))
+        cells = [std[(std["dataset"] == dataset) & (std["model"] == model)].iloc[0]
+                 for model in CLASSIFIERS]
+        block = _bold_best([[_cell(c[f"{m}_median"], c[f"{m}_ci_low"], c[f"{m}_ci_high"])
+                             for m in TABLE_METRICS] for c in cells])
+        print(rf"\multirow{{{len(block)}}}{{*}}{{{name}}}")
+        for label, row in zip(CLASSIFIERS.values(), block):
+            print(f"    & {label:<7} & " + _row(*row))
 
 
 def s3modes(df):
-    """tab:s3modes: prediction performance by mode, all five metrics, median over cells."""
+    """
+    tab:s3modes: prediction performance by mode, all five metrics, median over cells.
+
+    The whole table is one block: bold marks the best mode per metric, over all seven rows.
+    Bolding runs after the sort because it has to mark rows in the order they are emitted,
+    though which row wins does not depend on that order.
+    """
     modes = ["standard", f"fhe_{FHE_BITS}"] + [f"{g}_{SYNTH_SCALE}" for g in GENERATORS]
     rows = []
     for mode in modes:
         sub = df[df["mode"] == mode]
-        cells = [_ci(sub[f"{m}_median"].median(),
-                     sub[f"{m}_ci_low"].median(),
-                     sub[f"{m}_ci_high"].median()) for m in TABLE_METRICS]
-        rows.append((sub["roc_auc_median"].median(), _row(_mode_label(mode), *cells)))
-    for _, row in sorted(rows, key=lambda r: r[0], reverse=True):
-        print(row)
+        cells = [_cell(sub[f"{m}_median"].median(),
+                       sub[f"{m}_ci_low"].median(),
+                       sub[f"{m}_ci_high"].median()) for m in TABLE_METRICS]
+        rows.append((sub["roc_auc_median"].median(), _mode_label(mode), cells))
+    rows.sort(key=lambda r: r[0], reverse=True)
+    for (_, label, _), row in zip(rows, _bold_best([cells for _, _, cells in rows])):
+        print(_row(label, *row))
 
 
 def s4contrasts(_df):

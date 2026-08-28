@@ -36,20 +36,31 @@ for row, sig in zip(rows, stats["significant_holm"]):
     assert verdict == ("yes" if sig else "no"), f"significance drifted on: {row}"
 
 # 2. The baseline table is the standard-mode rows of the aggregated CSV, grouped by dataset.
+#    Each dataset is a \multirow header line plus three classifier rows, which are the only
+#    lines carrying data.
 rows = emit("s2baseline")
+data = [r for r in rows if r.startswith("    &")]
+assert sum(r.startswith(r"\multirow") for r in rows) == 6
 assert sum(r.startswith(r"\addlinespace") for r in rows) == 5
-assert len(rows) - 5 == 18, "expected 18 baseline rows, one per (dataset, classifier) cell"
+assert len(data) == 18, "expected 18 baseline rows, one per (dataset, classifier) cell"
 cell = df[(df["mode"] == "standard") & (df["dataset"] == "cardiotocography")
           & (df["model"] == "logistic_regression")].iloc[0]
 want = (f"{cell['roc_auc_median']:.3f} "
         f"({cell['roc_auc_ci_low']:.3f}--{cell['roc_auc_ci_high']:.3f})")
-assert rows[0].rstrip(r"\ ").endswith(want), f"{rows[0]!r} does not end in {want!r}"
+assert data[0].rstrip(r"\ ").endswith(want), f"{data[0]!r} does not end in {want!r}"
+# One bold per metric column per dataset block. Fails if a data refresh ever produces cells
+# that _bold_best cannot separate on the median or either interval bound, which would leave
+# a column with two winners.
+assert sum(r.count(r"\textbf") for r in data) == 30, "expected 6 datasets x 5 metric columns"
 
 # 3. Mode-level point estimates are the median over the 18 cells, not a pooled median.
 rows = emit("s3modes")
-emitted = {r.split("&")[0].strip(): r.split("&")[-1].strip().split()[0] for r in rows}
+assert sum(r.count(r"\textbf") for r in rows) == 5, "expected one bold per metric column"
+plain = [r.replace(r"\textbf{", "") for r in rows]  # the bold wraps the cell it marks
+emitted = {r.split("&")[0].strip(): r.split("&")[-1].strip().split()[0] for r in plain}
 for mode, label in [("standard", "Standard"), ("fhe_8", "FHE (8-bit)"), ("arf_100", "ARF")]:
     want = f"{df[df['mode'] == mode]['roc_auc_median'].median():.3f}"
     assert emitted[label] == want, f"{label}: emitted {emitted[label]}, expected {want}"
 
-print("ok: 648 contrasts verified row for row, 18 baseline rows, mode medians reproduced")
+print("ok: 648 contrasts verified row for row, 18 baseline rows, mode medians reproduced, "
+      "35 bold cells one per metric column per block")
