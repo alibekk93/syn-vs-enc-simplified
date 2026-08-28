@@ -17,8 +17,9 @@ Conventions, identical to report_aggregates.py and every figure:
   * cost            = CPU seconds (training_cpu_time / cpu_per_sample), never wall clock;
   * nothing is pooled across synthesis scales or across quantization precisions;
   * bold            = the best cell of a metric column within its block, in the two tables
-                      that mark one (tab:s2baseline per dataset, tab:s3modes overall). See
-                      _bold_best for what "best" means when the medians tie.
+                      that mark one (tab:s2baseline per dataset, tab:s3modes overall);
+  * underline       = the runner-up of a metric column, tab:s3modes only. See _mark_best for
+                      what "best" and "second" mean when the medians tie.
 
 Usage:
     python scripts/render_tables.py                 # every body (see SECTIONS)
@@ -88,27 +89,35 @@ def _cell(median, low, high, n=3):
     return _ci(median, low, high, n), (round(median, n), round(low, n), round(high, n))
 
 
-def _bold_best(block):
+def _mark_best(block, underline_second=False):
     """
-    Bold the best cell of every metric column of one block, given row-major _cell pairs.
+    Mark the best cell of every metric column of one block, given row-major _cell pairs.
 
-    Returns the text alone, the winners wrapped whole, interval included, since that is the
-    unit the column is compared on.
+    Bold is the best; `underline_second` also underlines the runner-up, which tab:s3modes
+    wants and tab:s2baseline does not, three classifiers being too few for a second place to
+    mean much. Returns the text alone, marked cells wrapped whole, interval included, since
+    that is the unit the column is compared on. \\underline is LaTeX kernel, so neither table
+    needs a package the preamble does not already load.
 
     The key carries the interval bounds after the median because the median alone does not
     decide three columns of tab:s2baseline, where cells are equal at full float precision
     rather than rounded into equality: accuracy on mammographic mass (RF and XGBoost, both
     0.8238), F1 on diabetes (LR and RF, both 0.5591), and accuracy on heart disease (all
     three classifiers, 0.8689). Among equal medians the higher lower bound wins, then the
-    higher upper bound; all three resolve on the lower bound alone. Anything still tied
-    after that is indistinguishable in every number printed, and all of it is bolded.
+    higher upper bound; all three resolve on the lower bound alone.
+
+    Ranks are shared, so cells identical in all three numbers are marked alike rather than
+    separated arbitrarily. Second place is the second distinct key, not the second row: where
+    two cells tie for best, the next one down is still the runner-up.
     """
     out = [[text for text, _ in row] for row in block]
     for col in range(len(out[0])):
-        best = max(row[col][1] for row in block)
+        ranked = sorted({row[col][1] for row in block}, reverse=True)
+        marks = dict(zip(ranked, [r"\textbf"] + ([r"\underline"] if underline_second else [])))
         for i, row in enumerate(block):
-            if row[col][1] == best:
-                out[i][col] = rf"\textbf{{{out[i][col]}}}"
+            command = marks.get(row[col][1])
+            if command:
+                out[i][col] = rf"{command}{{{out[i][col]}}}"
     return out
 
 
@@ -230,7 +239,7 @@ def s2baseline(df):
             print(r"\addlinespace")
         cells = [std[(std["dataset"] == dataset) & (std["model"] == model)].iloc[0]
                  for model in CLASSIFIERS]
-        block = _bold_best([[_cell(c[f"{m}_median"], c[f"{m}_ci_low"], c[f"{m}_ci_high"])
+        block = _mark_best([[_cell(c[f"{m}_median"], c[f"{m}_ci_low"], c[f"{m}_ci_high"])
                              for m in TABLE_METRICS] for c in cells])
         print(rf"\multirow{{{len(block)}}}{{*}}{{{name}}}")
         for label, row in zip(CLASSIFIERS.values(), block):
@@ -241,9 +250,15 @@ def s3modes(df):
     """
     tab:s3modes: prediction performance by mode, all five metrics, median over cells.
 
-    The whole table is one block: bold marks the best mode per metric, over all seven rows.
-    Bolding runs after the sort because it has to mark rows in the order they are emitted,
-    though which row wins does not depend on that order.
+    The whole table is one block: bold marks the best mode per metric and underline the
+    runner-up, over all seven rows. Marking runs after the sort because it has to mark rows
+    in the order they are emitted, though which row wins does not depend on that order.
+
+    The row order is the raw ROC-AUC median while the marks rank the printed one, so the two
+    can disagree where a pair prints alike: ARF leads FHE by 0.0005 (0.8641 against 0.8637)
+    and sorts above it, but both print 0.864 and the interval breaks the tie the other way,
+    putting the ROC-AUC underline on FHE. The caption already tells the reader the row order
+    asserts no ordering between those two.
     """
     modes = ["standard", f"fhe_{FHE_BITS}"] + [f"{g}_{SYNTH_SCALE}" for g in GENERATORS]
     rows = []
@@ -254,7 +269,8 @@ def s3modes(df):
                        sub[f"{m}_ci_high"].median()) for m in TABLE_METRICS]
         rows.append((sub["roc_auc_median"].median(), _mode_label(mode), cells))
     rows.sort(key=lambda r: r[0], reverse=True)
-    for (_, label, _), row in zip(rows, _bold_best([cells for _, _, cells in rows])):
+    block = _mark_best([cells for _, _, cells in rows], underline_second=True)
+    for (_, label, _), row in zip(rows, block):
         print(_row(label, *row))
 
 
